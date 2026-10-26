@@ -1,6 +1,18 @@
 # EntryBrowser
 
-A fast, lightweight, from-scratch web browser engine — no Chromium, no WebKit, no Gecko. Pure Python + Pillow + QuickJS, works out of the box. **v2.0.0**
+A fast, lightweight, from-scratch web browser engine — no Chromium, no WebKit, no Gecko. Pure Python + Pillow + QuickJS, works out of the box. **v0.3.0**
+
+## What's new in v0.3.0
+
+- **Full flexbox** — row/column, wrap, gap, justify-content (start/center/end/space-between), align-items, flex-grow distribution.
+- **CSS Grid** — `grid-template-columns` with `repeat(N, 1fr)`, px and auto tracks, gap, source-order placement.
+- **Floats** — left/right floats with text wrap-around, block-level float avoidance, and `clear`.
+- **Positioning** — `absolute` (top/left/right/bottom incl. %), `fixed`, and `relative` offsets; `z-index` paint ordering; `opacity`; `overflow: hidden` clipping; `box-sizing: border-box`.
+- **SVG rendering** — inline SVG images decoded via cairosvg and painted (data: URIs verified).
+- **JS events + timers** — `addEventListener`, `onclick` attributes, `Tab.click(selector)` with automatic re-layout, `setTimeout`/`setInterval` dispatch.
+- **List markers** — disc bullets and ordered numbering painted per `list-style-type`.
+- **Style cache** — per-node computed-style memoization across the layout pass.
+- **33 contract tests** — flex, grid, float+clear, absolute positioning, click-reflow, timers, SVG, border-box, overflow clipping.
 
 ## What's new in v2
 
@@ -55,12 +67,20 @@ tab.render_png("page.png")
 print(tab.text())         # extracted readable text
 ```
 
-## Known limits (v2, honest)
+## Benchmarks (1280px, live network included, 2-core box)
 
-- No float/absolute positioning, no CSS grid, limited flexbox (row only).
-- Multi-column nav layouts (flex/grid-heavy sites) stack vertically.
-- No SVG rendering; SVG images are skipped.
-- JS: no event handlers (onclick etc.) yet — script-on-load only, no timers.
+| Site | Time | DOM nodes |
+|---|---|---|
+| example.com | 27 ms | 14 |
+| MDN Web docs | 72 ms | 1,714 |
+| python.org (images) | 250 ms | 1,855 |
+| news.ycombinator.com | 820 ms | 1,307 |
+| Wikipedia full article | 1.1 s | 7,367 |
+
+## Known limits (v0.3, honest)
+
+- Complex multi-column magazine layouts (heavy float+abs compositions, e.g. Wikipedia sidebars) can overlap.
+- JS: no event bubbling model, no DOM event objects, timers fire manually via `run_timers()`.
 - Wikimedia image hosts rate-limit some fetches (429) — host-side, not engine-side.
 
 ## Tests

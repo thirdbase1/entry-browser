@@ -8,7 +8,7 @@ _decoded: dict[str, object] = {}
 
 def get_image(src: str, base_url: str = "", timeout=10):
     """Return a PIL.Image for src (http/https/data/file), or None. Cached in-process."""
-    if not src or src.lower().split("?")[0].endswith(".svg"):
+    if not src:
         return None
     if src.startswith("data:"):
         import base64
@@ -44,8 +44,18 @@ def get_image(src: str, base_url: str = "", timeout=10):
     try:
         from PIL import Image
         im = Image.open(io.BytesIO(data)).convert("RGBA")
-        if src.startswith("http"):
-            _decoded[src] = im
-        return im
     except Exception:
-        return None
+        # SVG and other vector formats via cairosvg
+        if b"<svg" in data[:512].lower() or ".svg" in src.lower().split("?")[0]:
+            try:
+                import cairosvg
+                png_bytes = cairosvg.svg2png(bytestring=data, output_width=512)
+                from PIL import Image
+                im = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+            except Exception:
+                return None
+        else:
+            return None
+    if src.startswith("http"):
+        _decoded[src] = im
+    return im

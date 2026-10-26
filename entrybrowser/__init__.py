@@ -80,6 +80,29 @@ class Tab:
         self._load_images()
         self.timings["images"] = time.perf_counter() - t4
         return self
+    def click(self, selector_or_id: str) -> bool:
+        """Dispatch click on an element (JS handler + onclick attr), then re-layout.
+        Returns True if the page mutated."""
+        el_id = self.js._bridge.qs(selector_or_id) if not selector_or_id.startswith("#") else selector_or_id[1:]
+        handled = self.js.fire_onclick_attr(el_id) or self.js.fire_event(el_id, "click")
+        if self.js.doc._mutated:
+            self._relayout()
+        return handled or self.js.doc._mutated
+    def _relayout(self):
+        """Re-run CSS + layout after JS DOM mutations."""
+        from .css import Stylesheet
+        t2 = time.perf_counter()
+        css_bits = []
+        for st in self.doc.query_all("style"):
+            css_bits.append(st.text)
+        self.stylesheet = Stylesheet.parse("\n".join(css_bits), viewport_w=self.viewport_w) if css_bits else None
+        from .layout import Layout
+        self.layout = Layout(self.doc, self.stylesheet, viewport_w=self.viewport_w)
+        self.root_box = self.layout.build()
+        self.timings["relayout"] = time.perf_counter() - t2
+        t4 = time.perf_counter()
+        self._load_images()
+        self.timings["images"] = time.perf_counter() - t4
     def _load_images(self):
         from .images import get_image
         from concurrent.futures import ThreadPoolExecutor

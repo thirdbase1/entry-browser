@@ -22,8 +22,12 @@ class JSRuntime:
         except ImportError:
             return
         self.ctx = quickjs.Context()
+        self._handlers: dict[tuple, object] = {}   # (elem_id, type) -> JS function
+        self._timers: dict[int, dict] = {}
+        self._timer_seq = 0
         self._bridge = _DomBridge(self)
-        for name in ("byId","prop","setProp","title","setTitle","byClass","qs","qsa","log","call"):
+        for name in ("byId","prop","setProp","title","setTitle","byClass","qs","qsa","log","call",
+                     "addEventListener","setTimeoutReg","setIntervalReg","setTimerFn"):
             self.ctx.add_callable(f"__{name}", getattr(self._bridge, name))
         self.ctx.eval("""
         function __mk(id) {
@@ -34,7 +38,8 @@ class JSRuntime:
             get innerHTML() { return __prop(id, 'innerHTML'); },
             set innerHTML(v) { __setProp(id, 'innerHTML', String(v)); },
             style: {},
-            remove: function() { __call(id, 'remove'); }
+            remove: function() { __call(id, 'remove'); },
+            addEventListener: function(type, fn) { __addEventListener(id, type, fn); }
           };
         }
         var document = {
@@ -45,11 +50,66 @@ class JSRuntime:
           get title(){ return __title(); },
           set title(v){ __setTitle(String(v)); }
         };
+        var __timers = { _n: 0 };
+        function setTimeout(fn, ms) { var id = __setTimeoutReg(); __setTimerFn(id, fn, false); return id; }
+        function setInterval(fn, ms) { var id = __setIntervalReg(); __setTimerFn(id, fn, true); return id; }
         var console = { log: function(){ __log(Array.prototype.join.call(arguments, ' ')); },
                         warn: function(){ __log('WARN: ' + Array.prototype.join.call(arguments, ' ')); },
                         error: function(){ __log('ERROR: ' + Array.prototype.join.call(arguments, ' ')); } };
         function alert(m){ __log('ALERT: ' + m); }
         """)
+    def addEventListener(self, elem_id, type, fn):
+        self._handlers[(elem_id, type)] = fn
+    def setTimeoutReg(self):
+        self._timer_seq += 1
+        self._timers[self._timer_seq] = {"fn": None, "fired": False}
+        return self._timer_seq
+    def setIntervalReg(self):
+        self._timer_seq += 1
+        self._timers[self._timer_seq] = {"fn": None, "interval": True}
+        return self._timer_seq
+    def fire_event(self, elem_id: str, type: str = "click") -> bool:
+        """Dispatch a DOM event; returns True if a handler ran."""
+        fn = self._handlers.get((elem_id, type))
+        if fn is None:
+            # bubble to ancestors via 'onclick' attributes handled at DOM level
+            return False
+        try:
+            fn()
+            return True
+        except Exception as e:
+            self.console_log.append(f"[event error] {e}")
+            return False
+    def fire_onclick_attr(self, elem_id: str) -> bool:
+        """Run onclick="..." attribute code for a node."""
+        n = self._bridge._n(elem_id)
+        code = (n.attrs.get("onclick") or "") if n else ""
+        if not code:
+            return False
+        el = self.ctx.eval(f"document.getElementById({elem_id!r})")
+        try:
+            self.ctx.eval(f"(function(el){{ {code} }})(document.getElementById({elem_id!r}))")
+            return True
+        except Exception as e:
+            self.console_log.append(f"[onclick error] {e}")
+            return False
+    def run_timers(self, max_steps: int = 20) -> int:
+        """Fire pending setTimeout callbacks (and N setInterval rounds). Returns count fired."""
+        fired = 0
+        for tid, t in list(self._timers.items()):
+            if t.get("fn") is None and not isinstance(t.get("interval"), bool):
+                continue
+            if t.get("fired") and not t.get("interval"):
+                continue
+            fn = t.get("fn")
+            if fn is not None:
+                try:
+                    fn(); fired += 1
+                except Exception as e:
+                    self.console_log.append(f"[timer error] {e}")
+            t["fired"] = True
+            if fired >= max_steps: break
+        return fired
     def run(self, code: str, url="<inline>") -> str | None:
         if not self.ok:
             return None
@@ -62,6 +122,17 @@ class JSRuntime:
 class _DomBridge:
     def __init__(self, rt: JSRuntime):
         self.rt = rt
+    def addEventListener(self, elem_id, type, fn):
+        self.rt._handlers[(str(elem_id), str(type))] = fn
+    def setTimerFn(self, tid, fn, interval):
+        t = self.rt._timers.get(tid)
+        if t is not None:
+            t["fn"] = fn
+            t["interval"] = bool(interval)
+    def setTimeoutReg(self):
+        return self.rt.setTimeoutReg()
+    def setIntervalReg(self):
+        return self.rt.setIntervalReg()
     def _n(self, i):
         for n in self.rt.doc.walk():
             if n.attrs.get("id") == i: return n

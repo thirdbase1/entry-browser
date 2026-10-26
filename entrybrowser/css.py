@@ -24,6 +24,10 @@ _KNOWN = {
     "font-style","line-height","text-align","text-decoration","letter-spacing",
     "text-transform","white-space","overflow","flex-direction","gap","justify-content",
     "align-items","border-radius","box-sizing","visibility","opacity","z-index",
+    "flex-wrap","flex-grow","flex-basis","flex-shrink","align-self","text-shadow",
+    "object-position","list-style","list-style-type","column-count","column-gap",
+    "grid-template-columns","grid-template-rows","grid-column","grid-row",
+    "top","left","right","bottom","inset","clear",
     "vertical-align","object-fit","float","clear",
 }
 
@@ -361,7 +365,8 @@ class Stylesheet:
     def _resolve(self, style, em):
         """Turn raw strings into typed values where layout needs them."""
         s = dict(style)
-        for k in ("width","height","min-width","max-width","min-height","max-height"):
+        for k in ("width","height","min-width","max-width","min-height","max-height",
+                  "top","left","right","bottom"):
             if isinstance(s.get(k), str):
                 s[k] = parse_length(s[k], em=em)
         for k in ("margin","padding"):
@@ -404,7 +409,10 @@ DEFAULT_STYLE = {
     "font-family": "sans-serif", "line-height": 1.2, "text-align": "left",
     "text-decoration": "none", "border": None, "border-radius": 0.0,
     "white-space": "normal", "overflow": "visible", "visibility": "visible",
-    "flex-direction": "row", "gap": 0.0, "float": "none",
+    "flex-direction": "row", "gap": 0.0, "float": "none", "clear": "none", "flex-grow": "0",
+    "flex-basis": None, "flex-wrap": "nowrap", "opacity": "1", "z-index": None,
+    "position": "static", "box-sizing": "content-box", "list-style-type": "disc",
+    "grid-template-columns": None, "grid-template-rows": None,
 }
 
 # UA stylesheet — the default look, override-able by page CSS
@@ -441,6 +449,8 @@ b, strong { font-weight: bold; }
 i, em, cite, var, dfn { font-style: italic; }
 u, ins { text-decoration: underline; }
 button, input, select, textarea { display: inline-block; }
+ul { list-style-type: disc; }
+ol { list-style-type: decimal; }
 """
 
 UA = Stylesheet.parse(UA_CSS)

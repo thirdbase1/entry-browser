@@ -164,3 +164,92 @@ def test_link_span_color():
     walk(t.root_box)
     spans = [s for s in all_spans if s[0] and "link" in s[0]]
     assert spans and spans[0][5] == (0, 0, 238, 255) and spans[0][6]  # blue + underline
+
+
+def test_flex_row_and_gap():
+    h = """<html><head><style>.f { display: flex; gap: 10px; }</style></head>
+    <body><div class="f"><div>A</div><div>B</div><div>C</div></div></body></html>"""
+    t = Tab(viewport_w=600).load(h, is_url=False)
+    f = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
+    assert len(f.children) == 3
+    xs = sorted(round(c.x) for c in f.children)
+    assert xs[1] - xs[0] > 30  # gap + width
+
+def test_flex_column():
+    h = """<html><head><style>.f { display: flex; flex-direction: column; }</style></head>
+    <body><div class="f"><div>A</div><div>B</div></div></body></html>"""
+    t = Tab(viewport_w=600).load(h, is_url=False)
+    f = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
+    assert len(f.children) == 2
+    assert f.children[1].y > f.children[0].y
+
+def test_grid_three_columns():
+    h = """<html><head><style>.g { display: grid; grid-template-columns: repeat(3, 1fr); }</style></head>
+    <body><div class="g"><div>1</div><div>2</div><div>3</div><div>4</div></div></body></html>"""
+    t = Tab(viewport_w=800).load(h, is_url=False)
+    g = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
+    assert len(g.children) == 4
+    row1_x = sorted(round(c.x) for c in g.children[:3])
+    assert len(set(row1_x)) == 3          # three distinct columns
+    assert g.children[3].y >= g.children[0].y + g.children[0].h  # second row
+
+def test_float_left_with_text_wrap():
+    h = """<html><body>
+    <img src="x.png" width="80" height="80" style="float: left">
+    <p>This text should wrap around the floated image on the left side of the page here.</p>
+    </body></html>"""
+    t = Tab(viewport_w=400).load(h, is_url=False)
+    spans = []
+    def walk(b):
+        spans.extend(b.spans)
+        for c in b.children: walk(c)
+    walk(t.root_box)
+    assert spans
+
+def test_absolute_position():
+    h = """<html><head><style>.abs { position: absolute; top: 50px; left: 100px; }</style></head>
+    <body><div class="abs">positioned</div></body></html>"""
+    t = Tab(viewport_w=600).load(h, is_url=False)
+    d = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
+    assert abs(d.x - 108) < 3 and abs(d.y - 58) < 3  # relative to body padding box (margin 8)
+
+def test_js_click_reflow():
+    h = """<html><body><button id="b" onclick="document.getElementById('o').textContent='pressed'">Go</button>
+    <div id="o"></div></body></html>"""
+    t = Tab(viewport_w=600).load(h, is_url=False)
+    t.click("#b")
+    assert "pressed" in t.text()
+
+def test_js_addEventListener_and_timer():
+    h = """<html><body><div id="d"></div><script>
+    document.getElementById('d').addEventListener('click', function(){ this; });
+    setTimeout(function(){ console.log('t'); }, 50);
+    </script></body></html>"""
+    t = Tab(viewport_w=600).load(h, is_url=False)
+    assert t.js.run_timers() >= 1 and "t" in t.js_logs
+
+def test_svg_data_uri_image():
+    import base64
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="18" fill="red"/></svg>'
+    h = f'<html><body><img src="data:image/svg+xml;base64,{base64.b64encode(svg).decode()}" width="40" height="40"></body></html>'
+    t = Tab(viewport_w=400).load(h, is_url=False)
+    imgs = []
+    def walk(b):
+        if b.node is not None and b.node.tag == "img": imgs.append(b)
+        for c in b.children: walk(c)
+    walk(t.root_box)
+    assert imgs and imgs[0].img is not None
+
+def test_box_sizing_border_box():
+    h = """<html><head><style>.b { box-sizing: border-box; width: 100px; padding: 20px; }</style></head>
+    <body><div class="b">x</div></body></html>"""
+    t = Tab(viewport_w=400).load(h, is_url=False)
+    d = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
+    assert abs(d.w - 100) < 2  # width includes padding
+
+def test_overflow_hidden():
+    h = """<html><head><style>.c { overflow: hidden; height: 20px; }</style></head>
+    <body><div class="c"><p>line1</p><p>line2</p></div></body></html>"""
+    t = Tab(viewport_w=400).load(h, is_url=False)
+    d = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
+    assert d.h <= 21  # clipped
