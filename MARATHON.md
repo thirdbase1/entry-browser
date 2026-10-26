@@ -128,3 +128,10 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Absolute width:auto elements capped at containing-block width.
 - Receipts: cnn.com overlaps 1062 -> 463 (top offender was image__dam-img at intrinsic
   2400-5154px wide); BBC 98->88; wiki/python.org stable. 53/53 tests.
+
+## Batch 15 — <picture> transparent wrapper in flex (breakthrough #12)
+- <picture> inside a flex container: promote its <img> as the flex item, applying the
+  picture's aspect-ratio to size the image (Chrome-parity sizing).
+- Receipts: cnn.com overlaps 463 -> 114; media cards now real boxes (div 298x302 vs
+  298x4); hero photo renders full-res with headlines clean; wiki/python/BBC/MDN stable;
+  53/53 tests. Remaining CNN chrome (header/nav/ticker) is client-rendered (no-JS scope).

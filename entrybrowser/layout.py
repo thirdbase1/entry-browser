@@ -215,6 +215,25 @@ class Layout:
                     else:
                         inline_run.append(child)  # whitespace between inlines
                     continue
+                if child.tag == "picture":
+                    # <picture> is a transparent wrapper — lay its <img> directly, with
+                    # the picture's aspect-ratio applied to the image sizing
+                    _imgk = [k for k in child.children if k.tag == "img"]
+                    if _imgk:
+                        _picstyle = self.style_for(child, style)
+                        _ar = _picstyle.get("aspect-ratio")
+                        _istyle = self.style_for(_imgk[0], style)
+                        if _ar and not _istyle.get("height"):
+                            try:
+                                _pa, _pb = str(_ar).split("/")
+                                _iar = float(_pa) / float(_pb)
+                                _iw = self._len(_istyle.get("width"), content_w) or float(_imgk[0].attr("width") or 0) or 300
+                                if _iw > content_w:
+                                    _iw = content_w
+                                _imgk[0].attr("height", str(int(_iw / _iar)))
+                                _imgk[0].attr("width", str(int(_iw)))
+                            except Exception: pass
+                        child = _imgk[0]
                 cstyle = self.style_for(child, style)
                 if self._display(cstyle) == "inline" or self._display(cstyle) == "inline-block":
                     # CSS: a block-level descendant inside an inline element forces the
@@ -431,8 +450,26 @@ class Layout:
         col = style.get("flex-direction", "row") == "column"
         wrap = style.get("flex-wrap", "nowrap") == "wrap"
         gap = self._len(style.get("gap"), cw) or 0.0
-        raw_items = [c for c in node.children
-                     if c.tag != "#text" or c.text.strip()]
+        raw_items = []
+        for c0 in node.children:
+            if c0.tag == "picture":
+                # transparent wrapper: promote its <img> as the flex item
+                _ik = [k for k in c0.children if k.tag == "img"]
+                if _ik:
+                    _pst = self.style_for(c0, style)
+                    _ar0 = _pst.get("aspect-ratio")
+                    _ist = self.style_for(_ik[0], style)
+                    if _ar0 and not _ist.get("height"):
+                        try:
+                            _q1, _q2 = str(_ar0).split("/")
+                            _w0 = self._len(_ist.get("width"), cw) or float(_ik[0].attr("width") or 0) or 300
+                            if _w0 > cw: _w0 = cw
+                            _ik[0].attr("width", str(int(_w0)))
+                            _ik[0].attr("height", str(int(_w0 / (float(_q1) / float(_q2)))))
+                        except Exception: pass
+                    c0 = _ik[0]
+            if c0.tag != "#text" or c0.text.strip():
+                raw_items.append(c0)
         # measure natural sizes — shrink-to-fit (max-content capped at container)
         def _max_content_w(b):
             """Max-content width of a laid-out box: longest unwrapped text run."""
@@ -1220,6 +1257,16 @@ class Layout:
                             iw = iw or 300; ih = ih or (iw * 0.66)
                         if iw > cw:
                             ih = ih * cw / iw; iw = cw
+                        if not ih:
+                            _par = img_node.parent
+                            while _par is not None and _par.tag == "picture":
+                                _ar = (self.style_for(_par, parent_style).get("aspect-ratio") or "")
+                                if _ar:
+                                    try:
+                                        pa, pb2 = _ar.split("/")
+                                        ih = iw / (float(pa) / float(pb2))
+                                    except Exception: pass
+                                break
                         cur_w = sum(w2["w"] + (space_w(w2["style"]) if w2["sb"] else 0) for w2 in words)
                         if words and cur_w + iw > cw: flush()
                         ib = Box(img_node, self.style_for(img_node, parent_style))
