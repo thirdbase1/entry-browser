@@ -122,11 +122,13 @@ def expand_border(v):
 # ---------------- selectors ----------------
 
 class SimpleSel:
-    __slots__ = ("tag","classes","ids","pseudo")
+    __slots__ = ("tag","classes","ids","pseudo","_universal")
     def __init__(self):
         self.tag = None; self.classes = []; self.ids = []; self.pseudo = None
+        self._universal = False
     def specificity(self):
-        return (len(self.ids), len(self.classes) + (1 if self.pseudo else 0), 1 if self.tag else 0)
+        tag_pts = 0 if getattr(self, "_universal", False) else (1 if self.tag else 0)
+        return (len(self.ids), len(self.classes) + (1 if self.pseudo else 0), tag_pts)
     def matches(self, node) -> bool:
         if self.tag and node.tag != self.tag: return False
         if self.ids:
@@ -153,7 +155,7 @@ class SimpleSel:
         return True
 
 _SEL_PART = re.compile(
-    r"([a-zA-Z][\w-]*)?"           # tag
+    r"(\*|[a-zA-Z][\w-]*)?"        # tag (\* = universal selector)
     r"(?:\.([\w-]+))?"             # .class
     r"(?:#([\w-]+))?"              # #id
     r"(?::(hover|focus|active|first-child|last-child|checked|disabled))?"  # pseudo
@@ -177,7 +179,9 @@ def parse_selector(sel: str):
         if not m: return None
         s = SimpleSel()
         s.tag = (m.group(1) or None)
-        if m.group(1) in ("*",""): s.tag = None if m.group(1) == "" else s.tag
+        if s.tag == "*": s.tag = None   # universal: matches all, zero tag specificity
+        # mark universal so specificity stays (0,0,0)
+        if m.group(1) == "*": s._universal = True
         if m.group(2): s.classes.append(m.group(2))
         if m.group(3): s.ids.append(m.group(3))
         if m.group(4): s.pseudo = m.group(4)

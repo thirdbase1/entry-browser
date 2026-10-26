@@ -42,3 +42,11 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
   Nav floats stack 0/213/427/640/853. 53/53 tests. Bench: example 29ms, MDN 82ms, python 285ms,
   HN 1.45s, wiki 1.66s.
 - Debug lesson: prints used `node` (parent) instead of `child` — cost an hour. var discipline.
+
+## Batch 6 — UNIVERSAL SELECTOR * (breakthrough #7)
+- `* { box-sizing: border-box }` etc. were DROPPED: _SEL_PART required [a-zA-Z] tag start,
+  so '*' rules never parsed. python.org (and most modern sites) rely on universal resets.
+- FIX: regex allows \*, universal maps to tag=None with zero specificity via _universal flag.
+- Receipts: python.org .small-widget w 339.6 -> 300 border-box; 4 cols at 0/300/599/899,
+  Jobs no longer clipped (text right 1258 < 1280). Leaf overlaps still 3 (2 off-screen).
+  53/53 tests. wikipedia unaffected (mw-content-text x=256 w=948 intact).
