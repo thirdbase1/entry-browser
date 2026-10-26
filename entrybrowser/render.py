@@ -95,6 +95,12 @@ def _paint_transformed(img, box):
 _PAINT_DRAW = [None]
 
 def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box):
+    # opacity:0 boxes are fully invisible (common for CSS checkbox hacks) — skip painting
+    try:
+        if float(box.style.get("opacity", 1) or 1) <= 0 and not (box.children or getattr(box, "spans", None)):
+            return
+    except (TypeError, ValueError):
+        pass
     if box.bg and box.w > 0 and box.h > 0 and not (len(box.bg) == 4 and box.bg[3] == 0):
         col = tuple(box.bg) if len(box.bg) == 4 else (*box.bg, 255)
         try:
@@ -135,6 +141,12 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box):
             d.rectangle([x0, y0, x1, y1], outline=tuple(bcol), width=int(box.border["width"]))
     # form widget chrome
     if getattr(box, "is_widget", False) and box.node is not None and box.w > 0:
+        # hidden widgets (opacity:0 checkbox hacks) paint nothing
+        try:
+            if float(box.style.get("opacity", 1) or 1) <= 0:
+                return
+        except (TypeError, ValueError):
+            pass
         nd = box.node
         t = nd.tag
         color = box.style.get("color") or (0, 0, 0, 255)

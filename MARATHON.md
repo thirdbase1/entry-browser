@@ -50,3 +50,11 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Receipts: python.org .small-widget w 339.6 -> 300 border-box; 4 cols at 0/300/599/899,
   Jobs no longer clipped (text right 1258 < 1280). Leaf overlaps still 3 (2 off-screen).
   53/53 tests. wikipedia unaffected (mw-content-text x=256 w=948 intact).
+
+## Batch 7 — hidden-widget paint skip + flex re-lay
+- opacity:0 boxes/widgets no longer painted (CSS checkbox hacks like wiki vector-dropdown-checkbox).
+- Flex items re-laid at final width after placement (probe pass could crush absolute descendants).
+- VERDICT: wikipedia sidebar "collapse" is CORRECT no-JS behavior (vector-dropdown-content is
+  height:0/visibility:hidden unless checkbox :checked; JS-free real browsers show it hidden too).
+  Closed as faithful-to-CSS. The dropdown IS interactive via :checked + click support.
+- 53/53 tests. Bench: example 28ms, MDN 93ms, python 292ms, wiki 1.86s, HN 4.1s (network).

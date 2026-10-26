@@ -469,7 +469,15 @@ class Layout:
                 cross_max = max(cross_max, h)
             placed.append(cb)
             box.children.append(cb)
-        # justify-content main-axis alignment (single-line only)
+        # Re-lay items at FINAL widths so absolute/float descendants land correctly
+        # (probe passes may have crushed nested absolutely-positioned subtrees).
+        for idx, it in enumerate(items):
+            cb = it["box"]
+            if cb.w > 0 and cb.node is not None:
+                nb = self._layout_block(it["child"], style, cb.x, cb.y, cb.w)
+                nb.x, nb.y = cb.x, cb.y
+                items[idx]["box"] = nb
+                box.children[box.children.index(cb)] = nb
         if not col and jc in ("center","flex-end","space-between") and not wrap:
             total = sum(i["box"].w for i in items) + gap*(n-1 if n else 0)
             if jc == "center": dx = max(0, (cw-total)/2)
