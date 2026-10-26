@@ -33,6 +33,27 @@ class Tab:
         self.title = parse_title(self.doc)
         self.timings["parse_html"] = time.perf_counter() - t1
         # collect page CSS
+        # run scripts (JS mutates the tree; layout happens after, so mutations land)
+        from .js import JSRuntime
+        self.js = JSRuntime(self.doc)
+        self.js.title = self.title
+        self.js_logs: list[str] = []
+        for script in self.doc.query_all("script"):
+            code = script.text or ""
+            src = script.attr("src")
+            if src and src.startswith("http"):
+                try:
+                    code, _, _ = net.fetch(src)
+                except Exception:
+                    continue
+            if code.strip():
+                self.js.console_log = self.js_logs
+                out = self.js.run(code)
+                if out and out.startswith("[js error]"):
+                    self.js_logs.append(out)
+        if self.js.doc._mutated:
+            t_after = self.doc.query_all("title")
+            self.title = self.js.title or (t_after[0].text_content().strip() if t_after else self.title)
         t2 = time.perf_counter()
         css_bits = []
         if css_text: css_bits.append(css_text)
@@ -49,13 +70,35 @@ class Tab:
                         if s == 200: css_bits.append(t)
                     except Exception:
                         pass
-        self.stylesheet = Stylesheet.parse("\n".join(css_bits)) if css_bits else None
+        self.stylesheet = Stylesheet.parse("\n".join(css_bits), viewport_w=self.viewport_w) if css_bits else None
         self.timings["parse_css"] = time.perf_counter() - t2
         t3 = time.perf_counter()
         self.layout = Layout(self.doc, self.stylesheet, viewport_w=self.viewport_w)
         self.root_box = self.layout.build()
         self.timings["layout"] = time.perf_counter() - t3
+        t4 = time.perf_counter()
+        self._load_images()
+        self.timings["images"] = time.perf_counter() - t4
         return self
+    def _load_images(self):
+        from .images import get_image
+        from concurrent.futures import ThreadPoolExecutor
+        targets = []
+        def walk(b):
+            if b.node is not None and b.node.tag == "img" and b.w > 0:
+                targets.append(b)
+            for c in b.children:
+                walk(c)
+        walk(self.root_box)
+        if not targets:
+            return
+        base = self.final_url or ""
+        def load(b):
+            im = get_image(b.node.attr("src"), base)
+            if im is not None:
+                b.img = (im, b.x, b.y, b.w, b.h)
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(load, targets))
     def render_png(self, out_path: str, height=None) -> str:
         t = time.perf_counter()
         h = height or max(600, content_height(self.root_box))
@@ -65,8 +108,14 @@ class Tab:
     def text(self) -> str:
         out = []
         def walk(b):
-            for t, _, _ in b.text_lines:
-                out.append(t)
+            if b.spans:
+                line, last = "", None
+                for text, tx, baseline, *_ in b.spans:
+                    if last is not None and abs(baseline - last) > 1:
+                        out.append(line.strip()); line = ""
+                    line += (" " if line and not line.endswith(" ") else "") + text
+                    last = baseline
+                if line.strip(): out.append(line.strip())
             for c in b.children:
                 walk(c)
         walk(self.root_box)

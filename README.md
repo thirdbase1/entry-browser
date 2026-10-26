@@ -1,6 +1,15 @@
 # EntryBrowser
 
-A fast, lightweight, from-scratch web browser engine — no Chromium, no WebKit, no Gecko. Pure Python + Pillow, works out of the box.
+A fast, lightweight, from-scratch web browser engine — no Chromium, no WebKit, no Gecko. Pure Python + Pillow + QuickJS, works out of the box. **v2.0.0**
+
+## What's new in v2
+
+- **JavaScript execution** — page scripts run in QuickJS with a mini-DOM (`getElementById`, `querySelector`, `textContent`, `innerHTML`, `document.title`, `style.color/background-color`, `console`). DOM mutations flow straight into layout.
+- **Real images** — fetched, decoded, cached, painted into the page (relative URLs, data: URIs, parallel loading).
+- **Link styling** — blue + underline via the cascade; bold, italic, serif/mono, superscript/subscript all render with proper fonts.
+- **Table grids** — table/tr/td/th render as bordered grids with header rows.
+- **@media queries** — min/max-width in px and em, media types (screen/print), `not` lists. Desktop/mobile CSS switching works.
+- **10–70× faster CSS** — rule indexing by rightmost selector key. MDN page: 614 ms → 8.8 ms CSS parse+match; full Wikipedia article renders in ~0.7 s including images.
 
 ```
 pip install pillow requests
@@ -46,13 +55,13 @@ tab.render_png("page.png")
 print(tab.text())         # extracted readable text
 ```
 
-## Known limits (v0.1, honest)
+## Known limits (v2, honest)
 
-- No tables as grids, no floats, no absolute positioning, no CSS grid.
-- No images fetched/painted (placeholder boxes only).
-- No JS execution by default; with `dukpy`, scripts run but there is no DOM API yet.
-- Selector matching is O(rules × nodes) per element — MDN-scale stylesheets take ~600 ms in CSS parse+match.
-- Inline formatting: no italics fonts selection yet (bold works), no superscript.
+- No float/absolute positioning, no CSS grid, limited flexbox (row only).
+- Multi-column nav layouts (flex/grid-heavy sites) stack vertically.
+- No SVG rendering; SVG images are skipped.
+- JS: no event handlers (onclick etc.) yet — script-on-load only, no timers.
+- Wikimedia image hosts rate-limit some fetches (429) — host-side, not engine-side.
 
 ## Tests
 

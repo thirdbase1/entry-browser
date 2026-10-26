@@ -185,25 +185,64 @@ def selector_matches(compound, node):
 # ---------------- stylesheet ----------------
 
 class Rule:
-    __slots__ = ("selectors","decls","order")
+    __slots__ = ("selectors","decls","order","keys")
     def __init__(self, selectors, decls, order):
         self.selectors = selectors  # list of compound selector lists
         self.decls = decls          # dict prop -> (value, important)
         self.order = order
+        # index keys: (tag, class, id, universal) of each compound's rightmost sel
+        self.keys = set()
+        if not selectors:   # inline-style pseudo-rule: never bucketed
+            return
+        for compound in selectors:
+            tag, cls, id_ = compound[-1][1].tag, None, None
+            if compound[-1][1].classes: cls = compound[-1][1].classes[0]
+            if compound[-1][1].ids: id_ = compound[-1][1].ids[0]
+            if id_: self.keys.add(("ID", id_))
+            elif cls: self.keys.add(("CLASS", cls))
+            elif tag: self.keys.add(("TAG", tag))
+            else: self.keys.add(("*", ""))
 
 class Stylesheet:
     def __init__(self):
         self.rules: list[Rule] = []
+        self._buckets: dict[tuple, list[Rule]] = {}
+    def _rebuild(self):
+        self._buckets = {}
+        for r in self.rules:
+            for k in r.keys:
+                self._buckets.setdefault(k, []).append(r)
+        # universal rules apply to everything
+        self._universal = self._buckets.get(("*", ""), [])
+    def candidate_rules(self, node):
+        """Rules whose rightmost selector COULD match node (superset, cheap)."""
+        if not self._buckets: self._rebuild()
+        out = list(self._universal)
+        b = self._buckets
+        out += b.get(("TAG", node.tag), [])
+        idv = node.attrs.get("id")
+        if idv:
+            for i in idv.split(): out += b.get(("ID", i), [])
+        cv = node.attrs.get("class")
+        if cv:
+            for c in cv.split(): out += b.get(("CLASS", c), [])
+        return out
     @classmethod
-    def parse(cls, css: str) -> "Stylesheet":
+    def parse(cls, css: str, viewport_w: float | None = None) -> "Stylesheet":
         ss = cls()
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
         order = 0
-        # naive top-level block splitter (no @media support yet)
-        for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
-            sel_txt, body = m.group(1).strip(), m.group(2)
-            if sel_txt.startswith("@"):  # skip at-rules for now
-                continue
+
+        def _emit(rules_css, media_ok=True):
+            nonlocal order
+            for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", rules_css):
+                sel_txt, body = m.group(1).strip(), m.group(2)
+                if not media_ok:
+                    continue
+                _rule(sel_txt, body)
+
+        def _rule(sel_txt, body):
+            nonlocal order
             decls = {}
             for d in body.split(";"):
                 if ":" not in d: continue
@@ -215,11 +254,75 @@ class Stylesheet:
                 if prop in _KNOWN or prop.startswith("-"):
                     decls[prop] = (val, important)
             sels = []
-            for s in sel_txt.split(","):
-                c = parse_selector(s)
+            for s_ in sel_txt.split(","):
+                c = parse_selector(s_)
                 if c: sels.append(c)
             if sels and decls:
                 ss.rules.append(Rule(sels, decls, order)); order += 1
+
+        def _walk(css_text, media_ok=True):
+            i = 0
+            n = len(css_text)
+            while i < n:
+                brace = css_text.find("{", i)
+                if brace == -1:
+                    break
+                sel = css_text[i:brace].strip()
+                depth = 1
+                j = brace + 1
+                while j < n and depth:
+                    if css_text[j] == "{": depth += 1
+                    elif css_text[j] == "}": depth -= 1
+                    j += 1
+                body = css_text[brace+1:j-1]
+                if sel.startswith("@media"):
+                    cond = sel[6:].strip()
+                    ok = media_ok and _media_ok(cond, viewport_w)
+                    _walk(body, ok)
+                elif sel.startswith("@"):
+                    pass  # skip other at-rules
+                else:
+                    if "{" in body:
+                        # shouldn't happen for plain rules; recurse defensively
+                        _walk(sel + "{" + body + "}", media_ok)
+                    else:
+                        if media_ok:
+                            _rule(sel, body)
+                i = j
+
+        def _media_ok(cond, vw):
+            # media TYPE check: print/handled/etc -> not screen; 'not print...' style lists
+            types = re.findall(r"\b(print|screen|all|braille|embossed|speech|tty|tv|handheld|projection)\b", cond)
+            nots = re.findall(r"\bnot\s+(\w+)", cond)
+            if types:
+                visible = [t for t in types if t in ("screen","all")]
+                # 'not print, braille' == only exclude those; ok if a screen type present
+                if not visible and not all(t in ("print","braille","embossed","speech","tty") for t in types):
+                    pass
+            for n in nots:
+                if n in ("screen","all"):
+                    return False
+            if types and not any(t in ("screen","all") for t in types):
+                return False  # print-only etc.
+            if vw is None: return True
+            ok = True
+            for part in re.split(r"\s*(?:,|\band\b)\s*", cond.strip("() ")):
+                if not part: continue
+                neg = part.startswith("not")
+                p = part[3:].strip() if neg else part
+                m = re.match(r"\(?([\w-]+)\s*:\s*([\d.]+)(px|em)\)?", p)
+                if not m:
+                    m = re.match(r"\(?([\w-]+)\)?", p)
+                    continue
+                feat, val = m.group(1), float(m.group(2)) * (16 if m.group(2) and m.group(2) and False else 1)
+                if p.endswith("em") or (m.lastindex or 0) >= 3 and m.group(3) == "em": val = float(m.group(2)) * 16
+                if feat == "min-width": r_ = vw >= val
+                elif feat == "max-width": r_ = vw <= val
+                else: continue
+                ok = ok and (not r_ if neg else r_)
+            return ok
+
+        _walk(css)
         return ss
     def computed(self, node, parent_style=None, em=16.0, base=None):
         """Cascade declarations onto node; base (e.g. UA result) wins over defaults."""
@@ -230,10 +333,13 @@ class Stylesheet:
                 if k in parent_style and parent_style[k] is not None:
                     style[k] = parent_style[k]
         matched = []
-        for rule in self.rules:
+        seen = set()
+        for rule in self.candidate_rules(node):
+            if id(rule) in seen: continue
+            seen.add(id(rule))
             for compound in rule.selectors:
                 if selector_matches(compound, node):
-                    spec = max(s.specificity() for _, s in compound)
+                    spec = max(sp.specificity() for _, sp in compound)
                     matched.append((spec, rule.order, rule))
                     break
         # style="" attribute: highest precedence except !important
@@ -280,7 +386,11 @@ class Stylesheet:
                 else:
                     s[k] = L[0]
         if isinstance(s.get("color"), str):
-            s["color"] = parse_color(s["color"])
+            c = parse_color(s["color"])
+            s["color"] = c if c else None  # layout falls back to parent/UA black
+        for deco_key in ("text-decoration",):
+            if isinstance(s.get(deco_key), str) and s[deco_key] in ("inherit","initial"):
+                s[deco_key] = None
         if isinstance(s.get("background-color"), str):
             s["background-color"] = parse_color(s["background-color"])
         return s
@@ -325,6 +435,11 @@ td, th { display: table-cell; padding: 1px; }
 tr { display: table-row; }
 span, small, big, sub, sup, abbr, cite, q, dfn, var, kbd, samp, time, mark,
 label, output, bdi, bdo, wbr, data { display: inline; }
+sup { font-size: 75%; vertical-align: super; }
+sub { font-size: 75%; vertical-align: sub; }
+b, strong { font-weight: bold; }
+i, em, cite, var, dfn { font-style: italic; }
+u, ins { text-decoration: underline; }
 button, input, select, textarea { display: inline-block; }
 """
 

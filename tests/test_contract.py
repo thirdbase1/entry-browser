@@ -72,7 +72,7 @@ def test_layout_blocks_and_wrapping():
     assert len(body.children) >= 3
     # text wraps: long paragraph produces >1 line
     pboxes = [b for b in body.children if b.node and b.node.tag == "p"]
-    assert pboxes and max(len(b.text_lines) for b in pboxes) > 1
+    assert pboxes and max(len(getattr(b, 'spans', [])) for b in pboxes) > 3
 
 def test_layout_bg_and_color():
     tab = Tab(viewport_w=400).load(FIX, is_url=False)
@@ -100,3 +100,67 @@ def test_cli_info():
                        capture_output=True, text=True,
                        cwd=os.path.join(os.path.dirname(__file__), ".."))
     assert r.returncode == 0 and "dom_nodes" in r.stdout
+
+
+def test_js_textcontent_and_title():
+    h = """<html><head><title>Old</title></head><body><p id="g">before</p>
+    <script>document.getElementById('g').textContent = 'after';
+    document.title = 'New';</script></body></html>"""
+    t = Tab(viewport_w=600).load(h, is_url=False)
+    assert "after" in t.text() and t.title == "New"
+
+def test_js_innerhtml_and_console():
+    h = """<html><body><div id="o"></div>
+    <script>document.getElementById('o').innerHTML = '<b>deep</b>';
+    console.log('ran');</script></body></html>"""
+    t = Tab(viewport_w=600).load(h, is_url=False)
+    assert "deep" in t.text() and "ran" in t.js_logs
+
+def test_table_grid():
+    h = "<html><body><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table></body></html>"
+    t = Tab(viewport_w=600).load(h, is_url=False)
+    tables = [b for b in t.root_box.children if b.node and b.node.tag == "table"]
+    assert tables and len(tables[0].children) >= 4  # 2 rows x 2 cells
+
+def test_media_query_desktop():
+    h = """<html><head><style>
+    @media (max-width: 768px) { .box { display: none; } }
+    @media (min-width: 769px) { .box { background-color: #00ff00; } }
+    </style></head><body><div class="box">x</div></body></html>"""
+    t = Tab(viewport_w=1280).load(h, is_url=False)
+    box = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
+    assert box.bg is not None and box.bg[1] == 255 and box.bg[0] == 0  # green
+
+def test_media_query_mobile_hides():
+    h = """<html><head><style>
+    @media (max-width: 768px) { .box { display: none; } }
+    </style></head><body><div class="box">x</div></body></html>"""
+    t = Tab(viewport_w=400).load(h, is_url=False)
+    box = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
+    assert box.h == 0 and not box.children
+
+def test_image_data_uri():
+    # 1x1 red PNG
+    import base64
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    import io as _io
+    b64 = base64.b64encode(png).decode()
+    h = f'<html><body><img src="data:image/png;base64,{b64}" width="10" height="10"></body></html>'
+    t = Tab(viewport_w=400).load(h, is_url=False)
+    imgs = []
+    def walk(b):
+        if b.node is not None and b.node.tag == "img": imgs.append(b)
+        for c in b.children: walk(c)
+    walk(t.root_box)
+    assert imgs and imgs[0].img is not None
+
+def test_link_span_color():
+    h = '<html><body><p>see <a href="#">the link</a> here</p></body></html>'
+    t = Tab(viewport_w=400).load(h, is_url=False)
+    all_spans = []
+    def walk(b):
+        all_spans.extend(b.spans)
+        for c in b.children: walk(c)
+    walk(t.root_box)
+    spans = [s for s in all_spans if s[0] and "link" in s[0]]
+    assert spans and spans[0][5] == (0, 0, 238, 255) and spans[0][6]  # blue + underline
