@@ -18,6 +18,7 @@ INHERITED = {
 _KNOWN = {
     "display","position","margin","margin-top","margin-right","margin-bottom","margin-left",
     "padding","padding-top","padding-right","padding-bottom","padding-left","aspect-ratio",
+    "clip","clip-path",
     "border","border-width","border-style","border-color",
     "width","height","min-width","max-width","min-height","max-height",
     "background","background-color","background-image","background-size","color","font-family","font-size","font-weight",
@@ -122,14 +123,21 @@ def expand_border(v):
 # ---------------- selectors ----------------
 
 class SimpleSel:
-    __slots__ = ("tag","classes","ids","pseudo","_universal")
+    __slots__ = ("tag","classes","ids","pseudo","_universal","nots")
     def __init__(self):
         self.tag = None; self.classes = []; self.ids = []; self.pseudo = None
+        self.nots = []
         self._universal = False
     def specificity(self):
         tag_pts = 0 if getattr(self, "_universal", False) else (1 if self.tag else 0)
         return (len(self.ids), len(self.classes) + (1 if self.pseudo else 0), tag_pts)
     def matches(self, node) -> bool:
+        for nspec in self.nots:
+            probe = parse_selector(nspec)
+            if probe and len(probe) == 1:
+                if probe[0][1].matches(node): return False
+            else:
+                return False  # unsupported :not shape -> conservative no-match
         if self.tag and node.tag != self.tag: return False
         if self.ids:
             idv = node.attr("id")

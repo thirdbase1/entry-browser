@@ -152,3 +152,10 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
   recursed without bound -> RecursionError on en.wikipedia.org/wiki/Python_(programming_language).
 - Receipts: bootstrap docs load 0.2s, 274 leaves, only 7 overlaps (53/53 tests); Python
   wiki article now loads (3.0s, 878 leaves — navbox tables are the next overlap front).
+
+## Batch 18 — :not() pseudo-class + visually-hidden clip skip
+- parse_selector now strips :not(simple) into SimpleSel.nots; matches() negates (also
+  fixed :not(...) selectors aborting the WHOLE rule — bootstrap.min.css lost hundreds of
+  rules this way).
+- clip-path: inset(50%) / clip: rect(0,0,0,0) -> paint skip (visually-hidden pattern).
+- Receipts: 53/53; bootstrap/wiki/pyo/BBC stable.

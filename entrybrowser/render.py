@@ -101,6 +101,11 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box):
             return
     except (TypeError, ValueError):
         pass
+    # visually-hidden pattern: clip: rect(0,0,0,0) / clip-path: inset(50%) -> invisible
+    _cp = str(box.style.get("clip-path") or "")
+    _cl = str(box.style.get("clip") or "")
+    if "inset(50%" in _cp or _cl.replace(" ", "").startswith("rect(0,0,0,0"):
+        return
     if box.bg and box.w > 0 and box.h > 0 and not (len(box.bg) == 4 and box.bg[3] == 0):
         col = tuple(box.bg) if len(box.bg) == 4 else (*box.bg, 255)
         try:
