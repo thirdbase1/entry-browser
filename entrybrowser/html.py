@@ -22,7 +22,7 @@ _BLOCKISH = {"div","p","h1","h2","h3","h4","h5","h6","ul","ol","table","blockquo
              "form","figure","dl","address","li","tr","td","th"}
 
 class Node:
-    __slots__ = ("tag","attrs","children","parent","text","_mutated")
+    __slots__ = ("tag","attrs","children","parent","text","_mutated","_pseudo_state")
     def __init__(self, tag: str, attrs: dict | None = None, parent: "Node | None" = None,
                  text: str = ""):
         self.tag = tag
@@ -31,6 +31,7 @@ class Node:
         self.parent = parent
         self.text = text
         self._mutated = False
+        self._pseudo_state = None
     def append(self, n: "Node"):
         n.parent = self
         self.children.append(n)

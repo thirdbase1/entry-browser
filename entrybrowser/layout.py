@@ -11,11 +11,13 @@ from .css import Stylesheet, UA, parse_color
 
 class Box:
     __slots__ = ("node","x","y","w","h","children","style","text_lines",
-                 "bg","border","radius","is_text","spans","img")
+                 "bg","border","radius","is_text","spans","img","is_widget","transform")
     def __init__(self, node=None, style=None):
         self.node = node; self.style = style or {}
         self.x = self.y = self.w = self.h = 0.0
         self.children: list[Box] = []
+        self.is_widget = False
+        self.transform = None
         self.text_lines: list[tuple[str,float,float]] = []  # (text, x, baseline_y)
         self.spans: list[tuple] = []  # (text, x, baseline, font_path, size, color, underline, superscript)
         self.img = None               # (PIL.Image, x, y, w, h) for painted images
@@ -115,6 +117,39 @@ class Layout:
         return style.get("position", "static")
 
     # ---- block layout ----
+    _TRANS_RE = None
+
+    def _parse_transform(self, v):
+        """Parse transform: translate(x,y) rotate(deg) scale(n) -> (tx, ty, deg, scale)."""
+        if not v or not isinstance(v, str):
+            return None
+        import re as _re
+        tx = ty = 0.0; deg = 0.0; sc = 1.0
+        found = False
+        for name, arg in _re.findall(r"(translate|rotate|scale)\(([^)]+)\)", v):
+            found = True
+            args = [a.strip() for a in arg.split(",")]
+            if name == "translate":
+                def _n(t):
+                    t = t.strip()
+                    if t.endswith("px"):
+                        try: return float(t[:-2])
+                        except ValueError: return 0.0
+                    try: return float(t)
+                    except ValueError: return 0.0
+                tx = _n(args[0]) if args else 0.0
+                ty = _n(args[1]) if len(args) > 1 else 0.0
+            elif name == "rotate":
+                a = args[0] if args else "0"
+                try:
+                    deg = float(a.rstrip("deg ").strip() or 0)
+                except ValueError:
+                    deg = 0.0
+            elif name == "scale":
+                try: sc = float(args[0])
+                except (ValueError, IndexError): sc = 1.0
+        return (tx, ty, deg, sc) if found else None
+
     def _layout_block(self, node, parent_style, x, y, cw):
         """Layout a block container; returns its Box with height set."""
         style = self.style_for(node, parent_style)
@@ -125,6 +160,7 @@ class Layout:
         box.radius = style.get("border-radius", 0.0) or 0.0
         if isinstance(box.radius, str):
             box.radius = 0.0
+        box.transform = self._parse_transform(style.get("transform"))
         mt, mr, mb, ml = (self._len(style.get(f"margin-{k}"), cw) for k in ("top","right","bottom","left"))
         pt, pr, pb, pl = (self._len(style.get(f"padding-{k}"), cw) for k in ("top","right","bottom","left"))
         bw = style.get("border") or {}
@@ -197,7 +233,7 @@ class Layout:
                         if lx is not None: cb.x = box.x + lx
                         elif rx is not None: cb.x = box.x + cw - cb.w - rx
                     box.children.append(cb)
-                    if cfloat in ("left","right"):
+                    if cfloat in ("left","right") and cb.w > 0:
                         self._floats.append(cb)   # register for text wrap
                     continue
                 clr = cstyle.get("clear") or "none"
@@ -325,92 +361,355 @@ class Layout:
         box.h += 2
 
     def _layout_grid(self, node, box, style, cx, cy, cw):
-        """Grid layout: grid-template-columns (repeat(N,1fr) | px list | auto),
-        gap, items placed in source order."""
+        """Grid layout: tracks (repeat(N,1fr) | minmax(a,b) | px | % | auto),
+        grid-template-areas with named areas, gap, source-order fallback."""
+        import re as _re
         tmpl = style.get("grid-template-columns") or ""
         gap = self._len(style.get("gap"), cw) or 0.0
+        if isinstance(style.get("gap"), str):
+            gm = _re.match(r"([\d.]+)px", style["gap"].strip())
+            gap = float(gm.group(1)) if gm else gap
         items = [c for c in node.children if c.tag != "#text" or c.text.strip()]
         if not items:
             box.h = 0; return
-        # parse template
-        cols = []
-        m = None
-        import re as _re
-        mr = _re.match(r"repeat\(\s*(\d+)\s*,\s*([^)]+)\)", tmpl.strip())
-        if mr:
-            n = int(mr.group(1)); unit = mr.group(2).strip()
-            cols = [unit] * n
-        elif tmpl.strip():
-            cols = [c.strip() for c in tmpl.split() if c.strip()]
+        def parse_track_list(t):
+            """Return list of track strings; supports repeat() and minmax()."""
+            tracks, i, n = [], 0, len(t)
+            while i < n:
+                if t[i] == " ":
+                    i += 1; continue
+                if t[i] == "(" or t.startswith("minmax", i):
+                    depth, j = 0, i
+                    while j < n:
+                        if t[j] == "(": depth += 1
+                        elif t[j] == ")":
+                            depth -= 1
+                            if depth == 0: break
+                        j += 1
+                    tracks.append(t[i:j+1]); i = j+1
+                elif t.startswith("repeat", i):
+                    depth, j = 0, i
+                    while j < n:
+                        if t[j] == "(": depth += 1
+                        elif t[j] == ")":
+                            depth -= 1
+                            if depth == 0: break
+                        j += 1
+                    inner = t[i:j+1]
+                    m2 = _re.match(r"repeat\(\s*(\d+)\s*,\s*(.+)\)", inner)
+                    if m2:
+                        tracks += [m2.group(2).strip()] * int(m2.group(1))
+                    i = j+1
+                else:
+                    j = t.find(" ", i)
+                    j = n if j == -1 else j
+                    tracks.append(t[i:j]); i = j
+            return [t2 for t2 in tracks if t2]
+
+        def _slen(t):
+            """Parse a raw css length string to px."""
+            t = (t or "").strip()
+            if not t: return 0.0
+            if t.endswith("px"):
+                try: return float(t[:-2])
+                except ValueError: return 0.0
+            if t.endswith("rem"):
+                try: return float(t[:-3]) * 16.0
+                except ValueError: return 0.0
+            if t.endswith("em"):
+                try: return float(t[:-2]) * 16.0
+                except ValueError: return 0.0
+            if t.endswith("%"):
+                try: return float(t[:-1]) / 100.0 * cw
+                except ValueError: return 0.0
+            try: return float(t)
+            except ValueError: return 0.0
+
+        def track_w(t, avail):
+            t = t.strip()
+            mmin = None; is_fr = False
+            mm = _re.match(r"minmax\(\s*([^,]+)\s*,\s*(.+)\)", t)
+            if mm:
+                t = mm.group(2).strip()  # size to max; min handled as floor
+                mn = mm.group(1).strip()
+                if not mn.endswith("fr") and mn not in ("auto","max-content"):
+                    mmin = _slen(mn)
+            if t.endswith("fr"):
+                is_fr = True; return ("fr", float(t[:-2]), mmin or 0)
+            if t in ("auto", "min-content", "max-content"): return ("auto", None, mmin or 0)
+            return ("px", _slen(t), mmin or 0)
+
+        tmpl_full = style.get("grid-template") or ""
+        gta = style.get("grid-template-areas") or ""
+        # grid-template shorthand WITHOUT quotes: '<row sizes> / <col tracks>'
+        cols = parse_track_list(tmpl) if tmpl else []
+        if not cols and tmpl_full and "/" in tmpl_full and "'" not in tmpl_full and '"' not in tmpl_full:
+            cols = parse_track_list(tmpl_full.split("/", 1)[1])
+        # rows/areas: grid-template shorthand 'r1' h1 'r2' h2 / cols
+        combined_t = (tmpl_full or "") + " " + (gta or "")
+        row_strings = []
+        _q = None; _buf = ""
+        for _ch in combined_t:
+            if _q:
+                if _ch == _q:
+                    row_strings.append(_buf); _q = None; _buf = ""
+                else: _buf += _ch
+            elif _ch in "\"'":
+                _q = _ch
+        row_strings = [r for r in row_strings if r.strip()]
+        rows_from_areas = None
+        if row_strings:
+            rows_from_areas = [r.split() for r in row_strings if r.strip()]
+        if rows_from_areas and not cols:
+            # columns from the part after '/'
+            slash = tmpl_full.rfind("/")
+            if slash != -1:
+                cols = parse_track_list(tmpl_full[slash+1:])
+            elif gta:
+                cols = ["1fr"] * max(len(r) for r in rows_from_areas)
         if not cols:
-            # auto: square-ish grid
             n = max(1, int(len(items) ** 0.5 + 0.999))
             cols = ["1fr"] * n
-        # resolve widths
+            ncol = len(cols)
+            parsed = [track_w(c, cw) for c in cols]
+            fr_total = sum(p_[1] for p_ in parsed if p_[0] == "fr")
+            fixed = sum(p_[1] for p_ in parsed if p_[0] == "px")
+            fr_avail = max(0, cw - fixed - gap*(ncol-1))
+            widths = []
+            for kind, val, mn in parsed:
+                if kind == "fr":
+                    widths.append(max(mn, fr_avail * (val/fr_total if fr_total else 0)))
+                elif kind == "auto":
+                    widths.append(max(mn, (cw - fixed) / max(1, ncol)))
+                else:
+                    widths.append(val)
+        # named-area map from style (grid-area on children is handled below via raw css)
+        ncol = len(cols)
+        parsed = [track_w(c, cw) for c in cols]
+        fr_total = sum(p[1] for p in parsed if p[0] == "fr")
+        fixed = sum(p[1] for p in parsed if p[0] == "px")
+        fr_avail = max(0, cw - fixed - gap*(ncol-1))
         widths = []
-        fr_total = sum(float(c[:-2]) for c in cols if c.endswith("fr"))
-        fixed = sum(self._len(c, cw) or 0 for c in cols if not c.endswith("fr") and c != "auto")
-        fr_avail = max(0, cw - fixed - gap*(len(cols)-1))
-        for c in cols:
-            if c.endswith("fr"):
-                f = float(c[:-2])
-                widths.append(fr_avail * (f/fr_total if fr_total else 0))
-            elif c == "auto":
-                widths.append((cw - fixed) / max(1, len(cols)))
+        for kind, val, mn in parsed:
+            if kind == "fr":
+                widths.append(max(mn, fr_avail * (val/fr_total if fr_total else 0)))
+            elif kind == "auto":
+                widths.append(max(mn, (cw - fixed) / max(1, ncol)))
             else:
-                widths.append(self._len(c, cw) or 0)
-        # place items
-        x, y = cx, cy
-        row_h = 0
-        col_i = 0
-        for child in items:
-            w = widths[col_i]
-            cb = self._layout_block(child, style, x, y, w)
-            row_h = max(row_h, cb.h)
+                widths.append(val)
+        # build cell grid: named areas (grid-area: <name>) or source order
+        area_of = {}
+        cell_grid = {}
+        grid = []
+        if rows_from_areas:
+            area_cells = {}
+            for ri, row in enumerate(rows_from_areas):
+                for ci, name in enumerate(row):
+                    area_cells.setdefault(name, []).append((ri, ci))
+            placed = set()
+            r_i = 0
+            for child in items:
+                cst = self.style_for(child, style)
+                ga = cst.get("grid-area") or cst.get("_grid_area")
+                if isinstance(ga, str) and ga.strip() in area_cells:
+                    cells = area_cells[ga.strip()]
+                    r0, c0 = cells[0]
+                    r1 = max(c[0] for c in cells); c1 = max(c[1] for c in cells)
+                    grid.append((r0, c0, r1, c1, child)); placed.add(ga.strip())
+                else:
+                    grid.append(None)
+            # source-order fill for unnamed/auto-placed children
+            free = [(ri, ci) for ri, row in enumerate(rows_from_areas)
+                    for ci, name in enumerate(row) if name == "."]
+            gi = 0
+            ncols_a = max(len(r) for r in rows_from_areas)
+            used = {(ri, ci) for ri, row in enumerate(rows_from_areas)
+                    for ci, name in enumerate(row) if name != "."}
+            for k, g in enumerate(grid):
+                if g is None:
+                    # auto-place: next free (row, col) not claimed by a named area
+                    placed = False
+                    while gi < len(free):
+                        ri, ci = free[gi]; gi += 1
+                        if (ri, ci) not in used:
+                            grid[k] = (ri, ci, ri, ci, items[k])
+                            placed = True
+                            break
+                    if not placed:
+                        # extend past defined rows
+                        auto_r = len(rows_from_areas) + (k - gi + 1)
+                        grid[k] = (auto_r, 0, auto_r, min(ncols_a - 1, 0), items[k])
+            grid = [g for g in grid if g]
+        elif not grid:
+            col_i = row_i = 0
+            for child in items:
+                grid.append((row_i, col_i, row_i, col_i, child))
+                col_i += 1
+                if col_i >= ncol:
+                    col_i = 0; row_i += 1
+        # row heights: auto — measure each item
+        nrows = (max(g[2] for g in grid) + 1) if grid else 1
+        row_h = [0.0] * nrows
+        # explicit row sizes from grid-template shorthand / grid-template-rows
+        row_sizes = []
+        if tmpl_full and "/" in tmpl_full:
+            pre = tmpl_full.split("/")[0]
+            szs = _re.findall(r"\b([\d.]+(?:px|fr|em|%)|auto|min-content|max-content)\b", pre)
+            szs = [z for z in szs if not _re.match(r"^\d", z) or "px" in z or "fr" in z or "em" in z or "%" in z or z == "auto"]
+            row_sizes = szs[:nrows]
+        rt = style.get("grid-template-rows")
+        if isinstance(rt, str) and rt.strip():
+            row_sizes = parse_track_list(rt)[:nrows]
+        for ri in range(min(len(row_sizes), nrows)):
+            t_ = row_sizes[ri]
+            if isinstance(t_, str) and t_.endswith("fr"):
+                continue  # fr rows grow in content pass below
+            L = track_w(t_, cw) if isinstance(t_, str) else ("px", 0, 0)
+            if L[0] == "px" and L[1]:
+                row_h[ri] = L[1]
+        cell_boxes = []
+        for (r0, c0, r1, c1, child) in grid:
+            span_w = sum(widths[c] for c in range(c0, min(c1+1, ncol))) + gap*max(0, c1-c0)
+            cb = self._layout_block(child, style, 0, 0, span_w)
+            cell_boxes.append((r0, c0, r1, c1, cb))
+            for r in range(r0, r1+1):
+                row_h[r] = max(row_h[r], cb.h / (r1 - r0 + 1))
+        # place
+        ys = [cy]
+        for h in row_h:
+            ys.append(ys[-1] + h + gap)
+        for (r0, c0, r1, c1, cb) in cell_boxes:
+            cb.x = cx + sum(widths[:c0]) + gap*c0
+            cb.y = ys[r0]
+            if r1 > r0:  # span rows: stretch
+                cb.h = max(cb.h, ys[r1] + row_h[r1] - cb.y - gap)
             box.children.append(cb)
-            x += w + gap
-            col_i += 1
-            if col_i >= len(cols):
-                col_i = 0
-                x = cx
-                y += row_h + gap
-                row_h = 0
-        box.h = (y + row_h) - cy
+        box.h = (ys[nrows-1] + row_h[nrows-1]) - cy if nrows else 0
 
     def _layout_table(self, node, box, style, cx, cy, cw):
-        """Grid table layout: equal-ish column widths, cell padding, borders."""
+        """Table layout with rowspan/colspan, cell padding, borders."""
         rows = [r for r in node.children if r.tag == "tr"] or [
             r for tr in node.children if tr.tag in ("tbody","thead","tfoot")
             for r in tr.children if r.tag == "tr"]
         if not rows:
             box.h = 0; return
-        ncells = max(len([c for c in r.children if c.tag in ("td","th")]) for r in rows)
-        if ncells == 0: box.h = 0; return
-        col_w = cw / ncells
-        y = cy
-        max_h = 0
-        for r in rows:
-            cells = [c for c in r.children if c.tag in ("td","th")]
-            x = cx
-            row_h = 0
+        # occupancy grid honoring rowspan/colspan
+        occupied: dict[tuple[int, int], bool] = {}
+        grid_rows: list[list[tuple]] = []  # (cell, col0, colspan, rowspan)
+        ncols = 0
+        for ri, r in enumerate(rows):
+            cells = [c for c in r.children if c.tag in ("td", "th")]
+            row_slots: list[tuple] = []
+            ci = 0
             for cell in cells:
+                while occupied.get((ri, ci)):
+                    ci += 1
+                try: cs = max(1, int(cell.attr("colspan") or 1))
+                except (TypeError, ValueError): cs = 1
+                try: rs = max(1, int(cell.attr("rowspan") or 1))
+                except (TypeError, ValueError): rs = 1
+                for dr in range(rs):
+                    for dc in range(cs):
+                        occupied[(ri + dr, ci + dc)] = True
+                row_slots.append((cell, ci, cs, rs))
+                ci += cs
+            ncols = max(ncols, ci)
+            grid_rows.append(row_slots)
+        ncols = max(ncols, max((max((c2 + cs for _, c2, cs, _ in slots), default=0) for slots in grid_rows), default=0))
+        if ncols == 0:
+            box.h = 0; return
+        col_w = cw / ncols
+        y = cy
+        row_hs = []
+        # first pass: measure row heights (cells not rowspanned from above)
+        cell_boxes = []
+        for ri, slots in enumerate(grid_rows):
+            for (cell, c0, cs, rs) in slots:
                 cell_style = self.style_for(cell, style)
                 pad = 2.0
-                cb = self._layout_block(cell, style, x + pad, y + pad, col_w - 2*pad)
-                # th bold handled via UA? add: cell bg + border
-                cellw = col_w
-                # draw cell box with border
+                span_w = col_w * cs - 2*pad
+                cb = self._layout_block(cell, style, 0, 0, span_w)
+                cell_boxes.append((ri, c0, cs, rs, cb, cell_style, span_w))
+            single = [t[4].h + 2*pad for t in cell_boxes if t[0] == ri and t[3] == 1]
+            row_hs.append(max(single) if single else 18.0)
+        # second pass: rowspan cells distribute over rows
+        for (ri, c0, cs, rs, cb, cell_style, span_w) in cell_boxes:
+            if rs > 1:
+                span_h = sum(row_hs[ri:ri+rs]) + 2*pad
+                if cb.h + 2*pad > span_h:
+                    extra = (cb.h + 2*pad - span_h) / rs
+                    for dr in range(rs):
+                        if ri + dr < len(row_hs):
+                            row_hs[ri + dr] += extra
+        y = cy
+        for ri, slots in enumerate(grid_rows):
+            x = cx
+            for (cell, c0, cs, rs) in slots:
+                match = [t for t in cell_boxes if t[0] == ri and t[1] == c0]
+                if not match:
+                    x += col_w * cs
+                    continue
+                _, _, _, _, cb, cell_style, span_w = match[0]
                 gb = Box(cell, cell_style)
-                gb.x = x; gb.y = y; gb.w = cellw; gb.h = cb.h + 2*pad
+                gb.x = x; gb.y = y; gb.w = col_w * cs; gb.h = sum(row_hs[ri:ri+rs])
                 gb.border = {"width": 1, "style": "solid", "color": (170,170,170,255)}
+                cb.x = x + pad; cb.y = y + pad
                 gb.children.append(cb)
-                # shift cell box contents
                 box.children.append(gb)
-                row_h = max(row_h, cb.h + 2*pad)
-                x += cellw
-            y += row_h
-            max_h = y - cy
-        box.h = max_h
+                x += col_w * cs
+            y += row_hs[ri]
+        box.h = y - cy
+
+    FORM_TAGS = ("input", "button", "select", "textarea")
+
+    def _widget_box(self, nd, parent_style, x, y, cw):
+        """Build a form-control widget box (leaf) with default + styled sizing."""
+        style = self.style_for(nd, parent_style)
+        box = Box(nd, style)
+        box.bg = style.get("background-color")
+        box.border = style.get("border")
+        box.radius = style.get("border-radius", 0.0) or 0.0
+        if isinstance(box.radius, str): box.radius = 0.0
+        t = nd.tag
+        # default sizes
+        if t == "input":
+            typ = (nd.attr("type") or "text").lower()
+            if typ == "checkbox": w, h = 13.0, 13.0
+            elif typ == "radio": w, h = 13.0, 13.0
+            else:
+                try: w = float(nd.attr("size") or 20) * 8.0 + 16.0
+                except (TypeError, ValueError): w = 176.0
+                h = 22.0
+        elif t == "button":
+            label = "".join(c.text or "" for c in nd.children if c.tag == "#text").strip()
+            try: fsz = float(style.get("font-size", 13.0) or 13.0)
+            except (TypeError, ValueError): fsz = 13.0
+            w = self._text_w(label, style.get("font-family", "sans-serif"), fsz, False, False) + 24.0
+            h = 24.0
+        elif t == "select": w, h = 160.0, 22.0
+        else:  # textarea
+            try: cols = float(nd.attr("cols") or 20); rows = float(nd.attr("rows") or 2)
+            except (TypeError, ValueError): cols, rows = 20, 2
+            w, h = cols * 8.0 + 18.0, rows * 18.0 + 8.0
+        # style overrides
+        W = style.get("width"); H = style.get("height")
+        if isinstance(W, (int, float)): w = float(W)
+        elif isinstance(W, str) and W.endswith("px"):
+            try: w = float(W[:-2])
+            except ValueError: pass
+        if isinstance(H, (int, float)): h = float(H)
+        elif isinstance(H, str) and H.endswith("px"):
+            try: h = float(H[:-2])
+            except ValueError: pass
+        box.x, box.y, box.w, box.h = x, y, max(1.0, w), h
+        if not box.bg:
+            box.bg = (239, 239, 239, 255) if t in ("button", "input", "select") else (255, 255, 255, 255)
+            if t == "textarea" or (t == "input" and (nd.attr("type") or "text").lower() not in ("checkbox", "radio", "submit", "button")):
+                box.bg = (255, 255, 255, 255)
+        if not box.border:
+            box.border = {"width": 1.0, "style": "solid", "color": (118, 118, 118, 255)}
+        box.is_widget = True
+        return box
 
     def _layout_inline_run(self, nodes, parent_box, parent_style, x, y, cw, floats=None):
         """Lay out a run of inline nodes as wrapped lines with per-word styled spans."""
@@ -444,6 +743,12 @@ class Layout:
             "underline": str(parent_style.get("text-decoration","none")) == "underline",
             "sup": False, "mono": False,
         }
+        try:
+            _ls = float(parent_style.get("letter-spacing", 0) or 0)
+        except (TypeError, ValueError):
+            _ls = 0.0
+        if _ls:
+            base_style["ls"] = _ls
         line_y = y
         max_y = y
         words = []   # list of dicts: text, w, style, space_before(bool)
@@ -470,7 +775,8 @@ class Layout:
                 dy = -font_size * 0.35 if st["sup"] else 0
                 parent_box.spans.append((w["text"], cur_x, baseline + dy,
                                          _find_font(st["family"], st["bold"], st["italic"]),
-                                         size, st["color"], st["underline"], st["sup"]))
+                                         size, st["color"], st["underline"], st["sup"], w.get("nd"),
+                                         st.get("ls", 0.0)))
                 cur_x += w["w"]
             max_y = max(max_y, line_y + line_h)
             words = []
@@ -478,15 +784,17 @@ class Layout:
             pending_space = False
         def space_w(st):
             return self._text_w(" ", st["family"], st["size"], st["bold"], st["italic"])
-        def add_word(text, st, sb):
+        def add_word(text, st, sb, nd=None):
             nonlocal pending_space
             ww = self._text_w(text, st["family"], st["size"], st["bold"], st["italic"])
+            if st.get("ls"):
+                ww += st["ls"] * len(text)
             _, avail, _l = line_span(line_y) if words else (0, cw, 0)
             cur_w = sum(w["w"] + (space_w(w["style"]) if w["sb"] else 0) for w in words)
             if words and cur_w + (space_w(st) if sb else 0) + ww > avail:
                 flush()
-            words.append({"text": text, "w": ww, "style": dict(st), "sb": sb and bool(words)})
-        def add_text(raw, st):
+            words.append({"text": text, "w": ww, "style": dict(st), "sb": sb and bool(words), "nd": nd})
+        def add_text(raw, st, nd=None):
             nonlocal pending_space
             toks = raw.split(" ")
             for i, tok in enumerate(toks):
@@ -494,7 +802,7 @@ class Layout:
                     continue
                 sb = pending_space or (i > 0 and True) or (i > 0)
                 # leading token: space only if pending_space from before
-                add_word(tok, st, sb if pending_space or i > 0 else False)
+                add_word(tok, st, sb if pending_space or i > 0 else False, nd)
                 pending_space = False
             if raw.endswith(" ") or (raw and raw[-1].isspace()):
                 pending_space = True
@@ -516,11 +824,19 @@ class Layout:
                 s2["family"] = "monospace"
             if nd.tag in ("sub","sup"):
                 s2["sup"] = True
+            try:
+                _ls2 = float(cstyle.get("letter-spacing", 0) or 0)
+            except (TypeError, ValueError):
+                _ls2 = 0.0
+            if _ls2:
+                s2["ls"] = _ls2
+            elif st.get("ls"):
+                s2["ls"] = st["ls"]
             return s2
         for nd in nodes:
             if nd.tag == "#text":
                 if nd.text:
-                    add_text(nd.text, base_style)
+                    add_text(nd.text, base_style, nd)
                 continue
             if nd.tag == "br":
                 flush(); continue
@@ -535,8 +851,20 @@ class Layout:
                 if words and cur_w + w > cw: flush()
                 ib = Box(nd, self.style_for(nd, parent_style))
                 ib.x = x + cur_w; ib.y = line_y; ib.w = w; ib.h = h
-                ib.bg = (210,210,210,255)
+                ib.bg = (235,235,235,255)
                 parent_box.children.append(ib)
+                pending_space = True
+                continue
+            if nd.tag in ("input", "button", "select", "textarea", "option", "label"):
+                if nd.tag == "label":
+                    st = node_style(nd, base_style)
+                    self._inline_children(nd, st, add_text, add_word)
+                    continue
+                wdg = self._widget_box(nd, parent_style, x, line_y, cw)
+                cur_w = sum(w2["w"] + (space_w(w2["style"]) if w2["sb"] else 0) for w2 in words)
+                if words and cur_w + wdg.w > cw: flush()
+                wdg.x = x + cur_w; wdg.y = line_y
+                parent_box.children.append(wdg)
                 pending_space = True
                 continue
             cstyle = self.style_for(nd, parent_style)
@@ -557,7 +885,7 @@ class Layout:
                         ib = Box(img_node, self.style_for(img_node, parent_style))
                         ib.x = x + sum(w2["w"] + (space_w(w2["style"]) if w2["sb"] else 0) for w2 in words)
                         ib.y = line_y; ib.w = iw; ib.h = ih
-                        ib.bg = (210,210,210,255)
+                        ib.bg = (235,235,235,255)
                         parent_box.children.append(ib)
                         pending_space = True
                 self._inline_children(nd, st, add_text, add_word) 
@@ -575,7 +903,7 @@ class Layout:
         """Recursively add an inline element's text children with merged style."""
         for c in nd.children:
             if c.tag == "#text":
-                if c.text: add_text(c.text, st)
+                if c.text: add_text(c.text, st, nd)
             elif c.tag == "br":
                 pass  # handled by caller only at top level; rare inside nested inlines
             else:

@@ -27,8 +27,10 @@ _KNOWN = {
     "flex-wrap","flex-grow","flex-basis","flex-shrink","align-self","text-shadow",
     "object-position","list-style","list-style-type","column-count","column-gap",
     "grid-template-columns","grid-template-rows","grid-column","grid-row",
+    "grid-template","grid-area","grid-template-areas",
     "top","left","right","bottom","inset","clear",
     "vertical-align","object-fit","float","clear",
+    "transform","transition","transition-duration","transition-property",
 }
 
 _NAMED = {
@@ -120,11 +122,11 @@ def expand_border(v):
 # ---------------- selectors ----------------
 
 class SimpleSel:
-    __slots__ = ("tag","classes","ids")
+    __slots__ = ("tag","classes","ids","pseudo")
     def __init__(self):
-        self.tag = None; self.classes = []; self.ids = []
+        self.tag = None; self.classes = []; self.ids = []; self.pseudo = None
     def specificity(self):
-        return (len(self.ids), len(self.classes), 1 if self.tag else 0)
+        return (len(self.ids), len(self.classes) + (1 if self.pseudo else 0), 1 if self.tag else 0)
     def matches(self, node) -> bool:
         if self.tag and node.tag != self.tag: return False
         if self.ids:
@@ -134,12 +136,27 @@ class SimpleSel:
             cv = node.attr("class") or ""
             classes = cv.split()
             if not all(c in classes for c in self.classes): return False
+        if self.pseudo:
+            p = self.pseudo
+            state = getattr(node, "_pseudo_state", None) or {}
+            if p == "hover" and not state.get("hover"): return False
+            if p == "focus" and not state.get("focus"): return False
+            if p == "active" and not state.get("active"): return False
+            if p == "checked" and node.attr("checked") is None: return False
+            if p == "disabled" and node.attr("disabled") is None: return False
+            if p in ("first-child", "last-child"):
+                par = node.parent
+                sibs = [c for c in (par.children if par else []) if c.tag != "#text"]
+                if not sibs or sibs[0] is not node if p == "first-child" else sibs[-1] is not node:
+                    if p == "first-child" and (not sibs or sibs[0] is not node): return False
+                    if p == "last-child" and (not sibs or sibs[-1] is not node): return False
         return True
 
 _SEL_PART = re.compile(
     r"([a-zA-Z][\w-]*)?"           # tag
     r"(?:\.([\w-]+))?"             # .class
     r"(?:#([\w-]+))?"              # #id
+    r"(?::(hover|focus|active|first-child|last-child|checked|disabled))?"  # pseudo
 )
 
 def parse_selector(sel: str):
@@ -163,6 +180,7 @@ def parse_selector(sel: str):
         if m.group(1) in ("*",""): s.tag = None if m.group(1) == "" else s.tag
         if m.group(2): s.classes.append(m.group(2))
         if m.group(3): s.ids.append(m.group(3))
+        if m.group(4): s.pseudo = m.group(4)
         out.append((comb, s))
         comb = None  # descendant by default
         i += 1
@@ -413,6 +431,7 @@ DEFAULT_STYLE = {
     "flex-basis": None, "flex-wrap": "nowrap", "opacity": "1", "z-index": None,
     "position": "static", "box-sizing": "content-box", "list-style-type": "disc",
     "grid-template-columns": None, "grid-template-rows": None,
+    "grid-template": None, "grid-area": None, "grid-template-areas": None,
 }
 
 # UA stylesheet — the default look, override-able by page CSS

@@ -12,6 +12,7 @@ class JSRuntime:
     def __init__(self, doc):
         self.doc = doc
         self.doc._mutated = False
+        self.focused_id = None
         self.console_log: list[str] = []
         self.title = ""
         self.ok = False
@@ -27,8 +28,9 @@ class JSRuntime:
         self._timer_seq = 0
         self._bridge = _DomBridge(self)
         for name in ("byId","prop","setProp","title","setTitle","byClass","qs","qsa","log","call",
-                     "addEventListener","setTimeoutReg","setIntervalReg","setTimerFn"):
-            self.ctx.add_callable(f"__{name}", getattr(self._bridge, name))
+                     "addEventListener","setTimeoutReg","setIntervalReg","setTimerFn","classListOp"):
+            self.ctx.add_callable("__classList" if name == "classListOp" else f"__{name}",
+                                  getattr(self._bridge, name))
         self.ctx.eval("""
         function __mk(id) {
           return {
@@ -37,9 +39,25 @@ class JSRuntime:
             set textContent(v) { __setProp(id, 'textContent', String(v)); },
             get innerHTML() { return __prop(id, 'innerHTML'); },
             set innerHTML(v) { __setProp(id, 'innerHTML', String(v)); },
+            get value() { return __prop(id, 'value'); },
+            set value(v) { __setProp(id, 'value', String(v)); },
+            get checked() { return __prop(id, 'checked') !== ''; },
+            set checked(v) { __setProp(id, 'checked', v ? '' : undefined); },
+            get tagName() { return __prop(id, 'tagName'); },
+            get disabled() { return __prop(id, 'disabled') !== ''; },
+            set disabled(v) { __setProp(id, 'disabled', v ? '' : undefined); },
             style: {},
+            focus: function() { __call(id, 'focus'); },
+            blur: function() { __call(id, 'blur'); },
+            click: function() { __call(id, 'click'); },
             remove: function() { __call(id, 'remove'); },
-            addEventListener: function(type, fn) { __addEventListener(id, type, fn); }
+            addEventListener: function(type, fn) { __addEventListener(id, type, fn); },
+            classList: {
+              add: function(c) { __classList(id, 'add', c); },
+              remove: function(c) { __classList(id, 'remove', c); },
+              toggle: function(c) { __classList(id, 'toggle', c); },
+              contains: function(c) { return __classList(id, 'contains', c); }
+            }
           };
         }
         var document = {
@@ -166,6 +184,9 @@ class _DomBridge:
         if n is None: return ""
         if p == "textContent": return n.text_content()
         if p == "innerHTML": return n.text_content()
+        if p == "tagName": return n.tag.upper()
+        if p == "value": return n.attrs.get("value", "".join(c.text or "" for c in n.children if c.tag == "#text") if n.tag == "textarea" else "")
+        if p == "checked" or p == "disabled": return n.attrs.get(p, "")
         if p.startswith("style."): return n.attrs.get("style","")
         return n.attrs.get(p, "")
     def setProp(self, i, p, v):
@@ -185,9 +206,33 @@ class _DomBridge:
         else:
             n.attrs[p] = str(v)
         self.rt.doc._mutated = True
+    def classListOp(self, i, op, c):
+        n = self._n(i)
+        if n is None: return ""
+        cls = (n.attrs.get("class") or "").split()
+        if op == "add" and c not in cls: cls.append(c)
+        elif op == "remove" and c in cls: cls.remove(c)
+        elif op == "toggle":
+            cls.remove(c) if c in cls else cls.append(c)
+        elif op == "contains":
+            return c in cls
+        n.attrs["class"] = " ".join(cls)
+        self.rt.doc._mutated = True
+        return ""
     def call(self, i, meth):
         n = self._n(i)
         if n is None: return
+        if meth == "focus":
+            self.rt.focused_id = i
+        elif meth == "blur":
+            self.rt.focused_id = None
+        elif meth == "click":
+            self.rt.fire_event(i, "click")
+            code = (n.attrs.get("onclick") or "")
+            if code:
+                try: self.rt.ctx.eval(f"(function(el){{ {code} }})(document.getElementById({i!r}))")
+                except Exception as e: self.rt.console_log.append(f"[click error] {e}")
+            self.rt.doc._mutated = True
         if meth == "remove":
             p = n.parent
             if p and n in p.children:

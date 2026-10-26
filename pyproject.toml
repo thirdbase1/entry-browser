@@ -1,6 +1,6 @@
 [project]
 name = "entrybrowser"
-version = "0.3.0"
+version = "0.4.0"
 description = "A fast, lightweight, from-scratch web browser engine in pure Python"
 requires-python = ">=3.10"
 dependencies = ["pillow", "requests"]
@@ -8,9 +8,6 @@ dependencies = ["pillow", "requests"]
 [project.optional-dependencies]
 js = ["quickjs"]
 svg = ["cairosvg"]
-
-[project.optional-dependencies]
-js = ["quickjs"]
 
 [project.scripts]
 entry-browser = "entrybrowser:main"
