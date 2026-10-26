@@ -250,6 +250,22 @@ class Layout:
                     self._floats = list(_floats_save)   # float context is per containing block
                     cb = self._layout_block(child, style, content_x, cy, content_w)
                     self._floats = _floats_save
+                    if self._pos(cstyle) in ("absolute","fixed") and not cstyle.get("width") \
+                            and (cb.w >= content_w * 0.98) and cb.children:
+                        # absolute with width:auto shrink-wraps to content (CSS 10.3.7)
+                        mcw = max((sp[1] + self._text_w(sp[0], "sans-serif", sp[4] or 16.0)
+                                   for c2 in [cb] for sp in getattr(c2, "spans", [])), default=0)
+                        def _deepest(b):
+                            m = 0.0
+                            for sp in getattr(b, "spans", []):
+                                m = max(m, sp[1] - cb.x + self._text_w(sp[0], "sans-serif", sp[4] or 16.0))
+                            for k in b.children:
+                                m = max(m, _deepest(k))
+                            return m
+                        mw = min(_deepest(cb) + 24, content_w)
+                        if 0 < mw < cb.w * 0.98:
+                            cb2 = self._layout_block(child, style, content_x, cy, mw)
+                            cb = cb2
                     if cfloat == "left":
                         # stack left floats: bump right until no float overlaps the rect
                         fx = content_x
@@ -275,12 +291,14 @@ class Layout:
                     # absolute/fixed: honor top/left/right/bottom relative to containing box
                     pos = self._pos(cstyle)
                     if pos in ("absolute","fixed"):
-                        def _px(v, base):
+                        ch_ = box.h  # percentages of top/bottom resolve against parent HEIGHT
+                        def _px(v, base, pct_base=None):
                             if isinstance(v, tuple):
-                                return base + (v[1]/100*cw if v[0] == "pct" else v[0])
+                                pb = pct_base if pct_base is not None else cw
+                                return base + (v[1]/100*pb if v[0] == "pct" else v[0])
                             if isinstance(v, (int, float)): return base + v
                             return None
-                        ty = _px(cstyle.get("top"), 0)
+                        ty = _px(cstyle.get("top"), 0, ch_)
                         lx = _px(cstyle.get("left"), 0)
                         rx = _px(cstyle.get("right"), 0)
                         ox, oy = cb.x, cb.y

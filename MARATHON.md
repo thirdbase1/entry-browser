@@ -58,3 +58,13 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
   height:0/visibility:hidden unless checkbox :checked; JS-free real browsers show it hidden too).
   Closed as faithful-to-CSS. The dropdown IS interactive via :checked + click support.
 - 53/53 tests. Bench: example 28ms, MDN 93ms, python 292ms, wiki 1.86s, HN 4.1s (network).
+
+## Batch 8 — INTERACTIVE DROPDOWNS (breakthrough #8: sibling combinators + :checked toggle)
+- parse_selector: added `~` (general sibling) and `+` (adjacent) combinators — wiki CSS relies
+  on `.vector-dropdown-checkbox:checked ~ .vector-dropdown-content`.
+- Tab.click toggles checkbox/radio checked attr + relayout.
+- _relayout now keeps externally-fetched stylesheet text (was dropping sheets on relayout).
+- absolute + width:auto shrink-wraps to content (CSS 10.3.7): dd-content w 1192 -> 185.
+- top/bottom % now resolve against parent HEIGHT (was width).
+- E2E receipt: toggling Main menu checkbox opens the full sidebar nav (Main page / Contents /
+  Current events / Random article / ... + Contribute section) — vision-confirmed. 53/53.

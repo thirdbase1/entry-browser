@@ -163,17 +163,21 @@ _SEL_PART = re.compile(
 
 def parse_selector(sel: str):
     """Return list of compound selectors joined by combinators.
-    We support: descendant (space) and child (>). Output: list of
-    (combinator, SimpleSel) with combinator of first = None."""
+    We support: descendant (space), child (>), adjacent (+), general sibling (~).
+    Output: list of (combinator, SimpleSel) with combinator of first = None."""
     out = []
     sel = re.sub(r"\s*>\s*", ">", sel.strip())
-    parts = re.split(r"(\s|>)", sel)
+    sel = re.sub(r"\s*~\s*", "~", sel)
+    sel = re.sub(r"\s*\+\s*", "+", sel)
+    parts = re.split(r"(\s|>|~|\+)", sel)
     comb = None
     i = 0
     while i < len(parts):
         p = parts[i]
-        if p in (" ", "", ">"):
+        if p in (" ", "", ">", "~", "+"):
             if p == ">": comb = "child"
+            elif p == "~": comb = "sibling"
+            elif p == "+": comb = "adjacent"
             i += 1; continue
         m = _SEL_PART.fullmatch(p)
         if not m: return None
@@ -201,6 +205,15 @@ def selector_matches(compound, node):
     if prev_comb == "child":
         p = node.parent
         return p is not None and selector_matches(rest, p)
+    if prev_comb in ("sibling", "adjacent"):
+        p = node.parent
+        if p is None: return False
+        sibs = [c for c in p.children if c.tag != "#text"]
+        try: idx = sibs.index(node)
+        except ValueError: return False
+        if prev_comb == "adjacent":
+            return idx > 0 and selector_matches(rest, sibs[idx-1])
+        return any(selector_matches(rest, sb) for sb in sibs[:idx])
     # descendant: walk all ancestors
     p = node.parent
     while p is not None and p.tag != "#document":

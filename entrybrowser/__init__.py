@@ -73,6 +73,7 @@ class Tab:
                         if s == 200: css_bits.append(t)
                     except Exception:
                         pass
+        self._ext_css_bits = list(css_bits)   # kept for _relayout
         self.stylesheet = Stylesheet.parse("\n".join(css_bits), viewport_w=self.viewport_w) if css_bits else None
         self.timings["parse_css"] = time.perf_counter() - t2
         t3 = time.perf_counter()
@@ -262,14 +263,23 @@ class Tab:
                     handled = True
                     break
                 p = p.parent
-        if self.js.doc._mutated:
+        # checkbox/radio activation toggles checked (CSS :checked responds after relayout)
+        toggled = False
+        if node is not None and node.tag == "input" and (node.attr("type") or "text") in ("checkbox", "radio"):
+            if node.attr("checked") is None:
+                node.attrs["checked"] = ""
+            else:
+                node.attrs.pop("checked", None)
+            toggled = True
+        if self.js.doc._mutated or toggled:
             self._relayout()
-        return handled or self.js.doc._mutated
+        return handled or toggled or self.js.doc._mutated
     def _relayout(self):
-        """Re-run CSS + layout after JS DOM mutations."""
+        """Re-run CSS + layout after JS DOM mutations (or :checked toggles).
+        Keeps externally-fetched stylesheet text; re-parses inline <style> only."""
         from .css import Stylesheet
         t2 = time.perf_counter()
-        css_bits = []
+        css_bits = self._ext_css_bits[:]   # cached external sheets from initial load
         for st in self.doc.query_all("style"):
             css_bits.append(st.text)
         self.stylesheet = Stylesheet.parse("\n".join(css_bits), viewport_w=self.viewport_w) if css_bits else None
