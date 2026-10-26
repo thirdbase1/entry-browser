@@ -100,19 +100,21 @@ class Layout:
 
     # ---- style ----
     def style_for(self, node, parent_style):
+        # computed style depends on (node, parent's INHERITED style). Parent NODE identity
+        # is the stable key: re-lays pass fresh dict instances for the same parent node.
+        pk = id(getattr(node, "parent", None) or 0)
         cache = getattr(self, "_style_cache", None)
         if cache is not None:
-            key = id(node)
+            key = (id(node), pk)
             hit = cache.get(key)
-            if hit is not None and hit[0] == id(parent_style) if isinstance(parent_style, dict) else False:
-                return hit[1]
-            # cache only when parent style object is the same instance
+            if hit is not None:
+                return hit
         em = parent_style.get("font-size", 16.0)
         st = UA.computed(node, parent_style, em=em)
         if self.ss:
             st = self.ss.computed(node, st, em=st.get("font-size", 16.0), base=st)
-        if cache is not None and isinstance(parent_style, dict):
-            cache[id(node)] = (id(parent_style), st)
+        if cache is not None:
+            cache[(id(node), pk)] = st
         return st
 
     def _display(self, style):

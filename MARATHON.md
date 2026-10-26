@@ -135,3 +135,12 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Receipts: cnn.com overlaps 463 -> 114; media cards now real boxes (div 298x302 vs
   298x4); hero photo renders full-res with headlines clean; wiki/python/BBC/MDN stable;
   53/53 tests. Remaining CNN chrome (header/nav/ticker) is client-rendered (no-JS scope).
+
+## Batch 16 — style cache 8x speedup (breakthrough #13)
+- ROOT: style_for memo keyed on id(parent_style DICT) — computed() returns a fresh dict
+  every call, so the key never matched and the cache always missed -> 124M
+  selector_matches on CNN (3.1MB inline CSS, 4569 rules). Rekeyed on parent NODE identity
+  (stable across re-lays).
+- Receipts: cnn.com load 89.5s -> 9.8s (8x, network-bound tail); MDN/python.org render
+  steady; all quality metrics identical (cnn 114, bbc 88, pyo 3, wiki grid exact).
+  53/53 tests.
