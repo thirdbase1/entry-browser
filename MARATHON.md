@@ -22,3 +22,12 @@ Goal: big breakthrough.
 11. Anonymous-block split: block descendants of inline elements lay as blocks.
 Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 7/10;
 53/53 tests; bench: example 28ms, MDN 83ms, wikipedia 0.74s warm, python.org 290ms.
+
+## Batch 4 — FLOAT CONTAINMENT + FLOAT STACKING (breakthrough #5)
+- python.org nav: floated LIs ALL stacked at x=0 → left-float stacking loop (rect-overlap bump).
+- CRITICAL BUG FOUND: float box registered at 2*fx — _shift_tree called AFTER cb.x=fx double-shifted (shift_tree moves cb.x itself). Order: shift FIRST with delta (fx - old_x), then cb.y.
+- Same double-shift in absolute branch → fixed with explicit dx/dy deltas.
+- _floats never cleared → stale probe floats polluting placements → clear per build() + replace-stale-node on register + cy-expiry.
+- Float containment (clearfix/BFC): block with only-floated children stayed h=0 → extend h to float bottoms when overflow!=visible or no in-flow content. ul.menu h=0→42.
+- Receipts: python.org overlaps 283→32; nav bar renders (dark blue + Python/PSF/Docs/PyPI/Jobs); hero below; vision 3/10→6/10. 53/53 tests. python.org 441ms, MDN 1.8s.
+- Next: right-column body text overlap on python.org (two-column grid collapse), wikipedia header chrome.

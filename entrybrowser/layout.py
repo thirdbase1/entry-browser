@@ -10,12 +10,13 @@ from .html import Node
 from .css import Stylesheet, UA, parse_color
 
 class Box:
-    __slots__ = ("node","x","y","w","h","children","style","text_lines",
+    __slots__ = ("node","x","y","w","h","children","style","text_lines","_is_float",
                  "bg","border","radius","is_text","spans","img","is_widget","transform","bg_img")
     def __init__(self, node=None, style=None):
         self.node = node; self.style = style or {}
         self.x = self.y = self.w = self.h = 0.0
         self.children: list[Box] = []
+        self._is_float = False
         self.is_widget = False
         self.transform = None
         self.text_lines: list[tuple[str,float,float]] = []  # (text, x, baseline_y)
@@ -88,6 +89,7 @@ class Layout:
 
     def build(self) -> Box:
         self._style_cache = {}   # id(node) -> (parent_style_id, style)
+        self._floats = []        # fresh float list per build (probes re-add their own)
         body = next((n for n in self.doc.query_all("body")), self.doc)
         root_style = {}
         root = self._layout_block(body, root_style, 0.0, 0.0, self.vw)
@@ -239,12 +241,33 @@ class Layout:
                     inline_run = []
                 fl = self._len(cstyle.get("float") or "none", content_w) if isinstance(cstyle.get("float"), str) else 0
                 cfloat = (cstyle.get("float") or "none")
+                # floats whose bottom is above the current y no longer constrain anything
+                if self._floats and cy > 0:
+                    self._floats = [fb for fb in self._floats if fb.y + fb.h > cy - 1]
                 if cfloat in ("left","right") or self._pos(cstyle) in ("absolute","fixed"):
                     cb = self._layout_block(child, style, content_x, cy, content_w)
                     if cfloat == "left":
-                        cb.x = content_x
+                        # stack left floats: bump right until no float overlaps the rect
+                        fx = content_x
+                        for _ in range(64):  # bounded
+                            hit = None
+                            for fb in self._floats:
+                                if fb.w > 0 and fb.y < cy + max(cb.h, 1) and cy < fb.y + fb.h and fx < fb.x + fb.w and fx + cb.w > fb.x:
+                                    if hit is None or fb.x + fb.w > hit:
+                                        hit = fb.x + fb.w
+                            if hit is None:
+                                break
+                            fx = hit
+                        _ox = cb.x
+                        if fx != _ox:
+                            Layout._shift_tree(cb, fx - _ox, 0)   # moves cb.x itself
+                        cb.y = cy
                     elif cfloat == "right":
                         cb.x = content_x + content_w - cb.w
+                        for fb in self._floats:
+                            if fb.w > 0 and fb.y <= cy < fb.y + fb.h and cb.x >= fb.x and cb.x < fb.x + fb.w:
+                                cb.x = fb.x - cb.w
+                                break
                     # absolute/fixed: honor top/left/right/bottom relative to containing box
                     pos = self._pos(cstyle)
                     if pos in ("absolute","fixed"):
@@ -256,11 +279,18 @@ class Layout:
                         ty = _px(cstyle.get("top"), 0)
                         lx = _px(cstyle.get("left"), 0)
                         rx = _px(cstyle.get("right"), 0)
-                        if ty is not None: cb.y = box.y + ty
-                        if lx is not None: cb.x = box.x + lx
-                        elif rx is not None: cb.x = box.x + cw - cb.w - rx
+                        ox, oy = cb.x, cb.y
+                        dx, dy = 0, 0
+                        if ty is not None: dy = box.y + ty - cb.y
+                        if lx is not None: dx = box.x + lx - cb.x
+                        elif rx is not None: dx = box.x + cw - cb.w - rx - cb.x
+                        if dx or dy:
+                            Layout._shift_tree(cb, dx, dy)
                     box.children.append(cb)
                     if cfloat in ("left","right") and cb.w > 0:
+                        # replace stale registration of the same node (probe re-lays)
+                        self._floats = [fb for fb in self._floats if fb.node is not node]
+                        cb._is_float = True
                         self._floats.append(cb)   # register for text wrap
                     continue
                 clr = cstyle.get("clear") or "none"
@@ -291,7 +321,29 @@ class Layout:
                 cy = self._layout_inline_run(inline_run, box, style, content_x, cy, content_w,
                                              floats=self._floats)
             H = style.get("height")
+            # Float containment: a block whose children are (all) floated never grew —
+            # standard clearfix / overflow:hidden cases leave parent h=0. When the block
+            # establishes a BFC-ish context (overflow hidden/auto) OR ends with floated
+            # children only, extend height to cover float bottoms.
+            _fl_kids = [c for c in box.children if c.w > 0 and getattr(c, "_is_float", False)]
+            if _fl_kids:
+                _bfc = str(style.get("overflow", "visible")) not in ("visible", None, "None")
+                _flow_kids = [c for c in box.children if not getattr(c, "_is_float", False)]
+                _has_flow_content = any(getattr(c, "spans", None) or getattr(c, "text_lines", None)
+                                        or (c.children or (c.node is not None and c.node.tag in
+                                        ("p","ul","ol","table","img","h1","h2","h3","h4","h5","h6","pre","blockquote")))
+                                        for c in _flow_kids)
             box.h = (cy + pb + bt) - box.y
+            if _fl_kids:
+                _bfc = str(style.get("overflow", "visible")) not in ("visible", None, "None")
+                _flow_kids = [c for c in box.children if not getattr(c, "_is_float", False)]
+                _has_flow_content = any(getattr(c, "spans", None) or getattr(c, "text_lines", None)
+                                        or (c.children or (c.node is not None and c.node.tag in
+                                        ("p","ul","ol","table","img","h1","h2","h3","h4","h5","h6","pre","blockquote")))
+                                        for c in _flow_kids)
+                if _bfc or not _has_flow_content:
+                    fb_max = max(c.y + c.h for c in _fl_kids)
+                    box.h = max(box.h, (fb_max + pb + bt) - box.y)
             if H:
                 box.h = self._len(H, cw)  # explicit height overrides content height
         if node.tag == "body":
