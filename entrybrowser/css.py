@@ -354,6 +354,34 @@ class Stylesheet:
             for k in INHERITED:
                 if k in parent_style and parent_style[k] is not None:
                     style[k] = parent_style[k]
+        # HTML presentational attributes (HTML4 era: bgcolor/width/align/border/valign...)
+        # lowest precedence — any real CSS overrides them
+        _pa = {}
+        def _want(k, v):
+            if v and k in _KNOWN:
+                _pa[k] = v
+        _bg = node.attr("bgcolor")
+        if _bg: _want("background-color", _bg)
+        _c = node.attr("color")
+        if _c and node.tag == "font": _want("color", _c)
+        _fc = node.attr("face")
+        if _fc and node.tag == "font": _want("font-family", _fc)
+        _al = (node.attr("align") or "").lower()
+        if _al in ("left","right","center","justify"):
+            if node.tag in ("table","td","th","tr","p","div","h1","h2","h3","h4","h5","h6"):
+                _want("text-align", _al)
+        _vl = (node.attr("valign") or "").lower()
+        if _vl in ("top","middle","bottom"):
+            _want("vertical-align", _vl)
+        _w = node.attr("width")
+        if _w and _w.isdigit():
+            _want("width", _w + "px")
+        _h = node.attr("height")
+        if _h and _h.isdigit():
+            _want("height", _h + "px")
+        if _pa:
+            for prop, val in _pa.items():
+                style[prop] = val
         matched = []
         seen = set()
         for rule in self.candidate_rules(node):
@@ -397,6 +425,14 @@ class Stylesheet:
                 else:
                     for side in "top right bottom left".split():
                         s[f"padding-{side}"] = m[side]
+        # side longhands may arrive as raw strings (inline styles, presentational hints)
+        for k in list(s.keys()):
+            for pre in ("margin-","padding-"):
+                if k.startswith(pre) and isinstance(s[k], str):
+                    try:
+                        s[k] = parse_length(s[k], em=em)
+                    except Exception:
+                        pass
         if isinstance(s.get("border"), str):
             s["border"] = expand_border(s["border"])
         for k in ("font-size","line-height","letter-spacing"):
@@ -456,7 +492,14 @@ a { color: #0000ee; text-decoration: underline; }
 hr { display: block; margin: 8px 0; }
 img { display: inline-block; }
 div, section, article, header, footer, nav, aside, main, figure, form, fieldset,
-dl, dt, dd, address, details, summary { display: block; }
+dl, dt, dd, address, details, summary, center, dir, menu, noframes, xmp,
+optgroup, option { display: block; }
+figure { margin: 16px 40px; }
+caption { display: block; text-align: center; }
+thead, tbody, tfoot { display: table-row-group; }
+colgroup, col { display: table-column-group; }
+fieldset { margin: 8px 0; padding: 8px; }
+br { display: inline; }
 table { border-collapse: collapse; }
 td, th { display: table-cell; padding: 1px; }
 tr { display: table-row; }

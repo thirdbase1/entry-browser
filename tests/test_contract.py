@@ -178,7 +178,7 @@ def test_flex_row_and_gap():
     f = next(b for b in t.root_box.children if b.node and b.node.tag == "div")
     assert len(f.children) == 3
     xs = sorted(round(c.x) for c in f.children)
-    assert xs[1] - xs[0] > 30  # gap + width
+    assert xs[1] - xs[0] >= 10  # at least the gap; items shrink-to-fit
 
 def test_flex_column():
     h = """<html><head><style>.f { display: flex; flex-direction: column; }</style></head>

@@ -246,14 +246,23 @@ class Layout:
                         if fb.y + fb.h > cy and fb.x > content_x + 50:
                             cy = max(cy, fb.y + fb.h)
                 cb = self._layout_block(child, style, content_x, cy, content_w)
-                # block-level float avoidance: shift right past active left floats
-                for fb in self._floats:
-                    if fb.y < cy + cb.h and cy < fb.y + fb.h and fb.x <= cb.x:
-                        cb.x = fb.x + fb.w
+                # CSS float model: block BORDER boxes may overlap float bands; only the
+                # inline content inside wraps. But if the block is a leaf with its own
+                # background/border and a float intersects it, shift sideways when it fits.
+                _intersects = [fb for fb in self._floats
+                               if fb.w > 0 and fb.h > 0 and fb.y < cy + cb.h and cy < fb.y + fb.h]
+                if _intersects and not cb.children and not (getattr(cb, "spans", None)):
+                    for fb in _intersects:
+                        if fb.x <= cb.x:
+                            nx = fb.x + fb.w
+                            if nx + cb.w <= self.vw * 0.98:
+                                cb.x = nx
+                                break
                 cy = cb.y + cb.h
                 box.children.append(cb)
             if inline_run:
-                cy = self._layout_inline_run(inline_run, box, style, content_x, cy, content_w)
+                cy = self._layout_inline_run(inline_run, box, style, content_x, cy, content_w,
+                                             floats=self._floats)
             H = style.get("height")
             box.h = (cy + pb + bt) - box.y
             if H:
@@ -270,6 +279,18 @@ class Layout:
             box.w = cw
         return box
 
+    @staticmethod
+    def _shift_tree(b, dx, dy):
+        b.x += dx; b.y += dy
+        if getattr(b, "spans", None):
+            new_spans = []
+            for sp in b.spans:
+                t, tx, bl = sp[0], sp[1], sp[2]
+                new_spans.append((t, tx + dx, bl + dy) + tuple(sp[3:]))
+            b.spans = new_spans
+        for c in b.children:
+            Layout._shift_tree(c, dx, dy)
+
     def _layout_flex(self, node, box, style, cx, cy, cw):
         """Flex container: row/column, wrap, gap, justify-content, align-items,
         flex-grow distribution. shrink not implemented (no overflow math)."""
@@ -278,7 +299,20 @@ class Layout:
         gap = self._len(style.get("gap"), cw) or 0.0
         raw_items = [c for c in node.children
                      if c.tag != "#text" or c.text.strip()]
-        # measure natural sizes
+        # measure natural sizes — shrink-to-fit (max-content capped at container)
+        def _max_content_w(b):
+            """Max-content width of a laid-out box: longest unwrapped text run."""
+            best = 0.0
+            if getattr(b, "spans", None):
+                # group spans by baseline; sum widths within a line
+                lines = {}
+                for sp in b.spans:
+                    lines.setdefault(round(sp[2], 1), 0.0)
+                    lines[round(sp[2], 1)] += sp[4] * 0.62 * len(sp[0]) + sp[9] * len(sp[0]) if len(sp) > 9 else sp[4] * 0.62 * len(sp[0])
+                best = max(lines.values()) if lines else 0.0
+            for c in b.children:
+                best = max(best, _max_content_w(c))
+            return best
         items = []
         for child in raw_items:
             cstyle = self.style_for(child, style)
@@ -288,6 +322,21 @@ class Layout:
             basis = cstyle.get("flex-basis")
             # natural content layout at full width for measuring
             cb = self._layout_block(child, style, 0, 0, cw)
+            _has_block_kids = any(c.node is not None and c.node.tag not in
+                                  ("#text", "span", "a", "em", "strong", "b", "i", "small")
+                                  and (getattr(c, "children", None) or getattr(c, "spans", None))
+                                  for c in cb.children)
+            _explicit_w = cstyle.get("width")
+            if not col and not _explicit_w and not _has_block_kids:
+                mcw = _max_content_w(cb)
+                if mcw > 0 and mcw < cb.w:
+                    # re-lay at max-content width (shrink-to-fit); pad for estimator error
+                    cb = self._layout_block(child, style, 0, 0, min(mcw * 1.18 + 16, cw))
+            elif _explicit_w and not col:
+                # explicit width (incl %) wins: re-lay at resolved width
+                wv = self._len(_explicit_w, cw)
+                if wv and wv > 0:
+                    cb = self._layout_block(child, style, 0, 0, min(wv, cw))
             items.append({"box": cb, "grow": grow, "basis": basis, "child": child})
         n = len(items)
         if n == 0:
@@ -326,6 +375,7 @@ class Layout:
                 line_used = 0; cross_max = 0
             if jc == "center" and not col:
                 pass  # handled via two-pass below
+            Layout._shift_tree(cb, x - cb.x, y - cb.y)
             cb.x, cb.y = x, y
             if col:
                 y += h + gap
@@ -579,7 +629,9 @@ class Layout:
         for h in row_h:
             ys.append(ys[-1] + h + gap)
         for (r0, c0, r1, c1, cb) in cell_boxes:
-            cb.x = cx + sum(widths[:c0]) + gap*c0
+            nx = cx + sum(widths[:c0]) + gap*c0
+            Layout._shift_tree(cb, nx - cb.x, ys[r0] - cb.y)
+            cb.x = nx
             cb.y = ys[r0]
             if r1 > r0:  # span rows: stretch
                 cb.h = max(cb.h, ys[r1] + row_h[r1] - cb.y - gap)
@@ -588,6 +640,11 @@ class Layout:
 
     def _layout_table(self, node, box, style, cx, cy, cw):
         """Table layout with rowspan/colspan, cell padding, borders."""
+        # presentational table attrs (HTML4)
+        try: _cpad = float(node.attr("cellpadding") or 2.0)
+        except (TypeError, ValueError): _cpad = 2.0
+        try: _cbord = int(node.attr("border") or 0)
+        except (TypeError, ValueError): _cbord = 0
         rows = [r for r in node.children if r.tag == "tr"] or [
             r for tr in node.children if tr.tag in ("tbody","thead","tfoot")
             for r in tr.children if r.tag == "tr"]
@@ -618,7 +675,35 @@ class Layout:
         ncols = max(ncols, max((max((c2 + cs for _, c2, cs, _ in slots), default=0) for slots in grid_rows), default=0))
         if ncols == 0:
             box.h = 0; return
-        col_w = cw / ncols
+        # natural (max-content) width per column from text metrics
+        def _txt_w(nd, fs):
+            total = 0.0
+            for t in nd.walk():
+                if t.tag == "#text" and t.text:
+                    total += fs * 0.55 * len(t.text)
+                if t.tag in ("img",):
+                    try: total += max(1, int(t.attr("width") or 40))
+                    except ValueError: total += 40
+            return total
+        col_nat = [30.0] * ncols
+        for ri, slots in enumerate(grid_rows):
+            for (cell, c0, cs, rs) in slots:
+                cell_style = self.style_for(cell, style)
+                w = _txt_w(cell, (cell_style.get("font-size") or 16.0) * 0.62)
+                per = w / cs
+                for k in range(cs):
+                    col_nat[c0 + k] = max(col_nat[c0 + k], min(per, cw * 0.6))
+        nat_total = sum(col_nat)
+        if nat_total > cw:
+            scale = cw / nat_total
+            col_w_list = [max(18.0, w * scale) for w in col_nat]
+        else:
+            col_w_list = list(col_nat)
+            extra = cw - nat_total
+            big = [i for i, w in enumerate(col_nat) if w >= nat_total / max(1, ncols) * 0.6] or list(range(ncols))
+            per = extra / len(big)
+            for i in big:
+                col_w_list[i] += per
         y = cy
         row_hs = []
         # first pass: measure row heights (cells not rowspanned from above)
@@ -626,8 +711,8 @@ class Layout:
         for ri, slots in enumerate(grid_rows):
             for (cell, c0, cs, rs) in slots:
                 cell_style = self.style_for(cell, style)
-                pad = 2.0
-                span_w = col_w * cs - 2*pad
+                pad = _cpad
+                span_w = sum(col_w_list[c0:c0+cs]) - 2*pad
                 cb = self._layout_block(cell, style, 0, 0, span_w)
                 cell_boxes.append((ri, c0, cs, rs, cb, cell_style, span_w))
             single = [t[4].h + 2*pad for t in cell_boxes if t[0] == ri and t[3] == 1]
@@ -647,16 +732,17 @@ class Layout:
             for (cell, c0, cs, rs) in slots:
                 match = [t for t in cell_boxes if t[0] == ri and t[1] == c0]
                 if not match:
-                    x += col_w * cs
+                    x += sum(col_w_list[c0:c0+cs])
                     continue
                 _, _, _, _, cb, cell_style, span_w = match[0]
                 gb = Box(cell, cell_style)
-                gb.x = x; gb.y = y; gb.w = col_w * cs; gb.h = sum(row_hs[ri:ri+rs])
-                gb.border = {"width": 1, "style": "solid", "color": (170,170,170,255)}
+                gb.x = x; gb.y = y; gb.w = sum(col_w_list[c0:c0+cs]); gb.h = sum(row_hs[ri:ri+rs])
+                gb.border = {"width": 1, "style": "solid", "color": (170,170,170,255)} if _cbord else None
+                Layout._shift_tree(cb, x + pad - cb.x, y + pad - cb.y)
                 cb.x = x + pad; cb.y = y + pad
                 gb.children.append(cb)
                 box.children.append(gb)
-                x += col_w * cs
+                x += sum(col_w_list[c0:c0+cs])
             y += row_hs[ri]
         box.h = y - cy
 
