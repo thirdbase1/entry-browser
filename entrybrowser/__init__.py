@@ -76,7 +76,7 @@ class Tab:
         self.stylesheet = Stylesheet.parse("\n".join(css_bits), viewport_w=self.viewport_w) if css_bits else None
         self.timings["parse_css"] = time.perf_counter() - t2
         t3 = time.perf_counter()
-        self.layout = Layout(self.doc, self.stylesheet, viewport_w=self.viewport_w)
+        self.layout = Layout(self.doc, self.stylesheet, viewport_w=self.viewport_w, base_url=self.final_url or "")
         self.root_box = self.layout.build()
         self.timings["layout"] = time.perf_counter() - t3
         t4 = time.perf_counter()
@@ -274,7 +274,7 @@ class Tab:
             css_bits.append(st.text)
         self.stylesheet = Stylesheet.parse("\n".join(css_bits), viewport_w=self.viewport_w) if css_bits else None
         from .layout import Layout
-        self.layout = Layout(self.doc, self.stylesheet, viewport_w=self.viewport_w)
+        self.layout = Layout(self.doc, self.stylesheet, viewport_w=self.viewport_w, base_url=self.final_url or "")
         self.root_box = self.layout.build()
         self.timings["relayout"] = time.perf_counter() - t2
         t4 = time.perf_counter()

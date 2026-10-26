@@ -11,7 +11,7 @@ from .css import Stylesheet, UA, parse_color
 
 class Box:
     __slots__ = ("node","x","y","w","h","children","style","text_lines",
-                 "bg","border","radius","is_text","spans","img","is_widget","transform")
+                 "bg","border","radius","is_text","spans","img","is_widget","transform","bg_img")
     def __init__(self, node=None, style=None):
         self.node = node; self.style = style or {}
         self.x = self.y = self.w = self.h = 0.0
@@ -21,7 +21,7 @@ class Box:
         self.text_lines: list[tuple[str,float,float]] = []  # (text, x, baseline_y)
         self.spans: list[tuple] = []  # (text, x, baseline, font_path, size, color, underline, superscript)
         self.img = None               # (PIL.Image, x, y, w, h) for painted images
-        self.bg = None; self.border = None; self.radius = 0.0
+        self.bg = None; self.border = None; self.radius = 0.0; self.bg_img = None
         self.is_text = False
     def __repr__(self):
         return f"Box({self.node.tag if self.node else 'anon'} {self.x:.0f},{self.y:.0f} {self.w:.0f}x{self.h:.0f})"
@@ -61,10 +61,11 @@ def _find_font(family: str, bold=False, italic=False) -> str:
 
 class Layout:
     def __init__(self, doc: Node, stylesheet: Stylesheet | None = None,
-                 viewport_w=800.0):
+                 viewport_w=800.0, base_url=""):
         self.doc = doc
         self.ss = stylesheet
         self.vw = viewport_w
+        self.base_url = base_url
         self._font_cache: dict[tuple, object] = {}
         self._measure_cache: dict[tuple, float] = {}
         self._floats: list = []   # active float boxes (cleared per block context; approximate)
@@ -156,6 +157,18 @@ class Layout:
         box = Box(node, style)
         box.x = x; box.y = y
         box.bg = style.get("background-color")
+        bi = style.get("background-image")
+        if isinstance(bi, str) and "url(" in bi:
+            try:
+                from .images import get_image as _gi
+                from urllib.parse import urljoin as _uj
+                u = bi[bi.index("url(") + 4: bi.index(")", bi.index("url("))].strip().strip("'\"")
+                if u.startswith("//"): u = "https:" + u
+                elif not u.startswith("http"): u = _uj(getattr(self, "base_url", "") or "", u)
+                im = _gi(u, "")
+                if im is not None: box.bg_img = (im, style.get("background-size"))
+            except Exception:
+                pass
         box.border = style.get("border")
         box.radius = style.get("border-radius", 0.0) or 0.0
         if isinstance(box.radius, str):
@@ -203,6 +216,21 @@ class Layout:
                     continue
                 cstyle = self.style_for(child, style)
                 if self._display(cstyle) == "inline" or self._display(cstyle) == "inline-block":
+                    # CSS: a block-level descendant inside an inline element forces the
+                    # inline to split into anonymous blocks; approximate by laying the
+                    # whole inline element as a block when it contains block children.
+                    _has_blk = any(
+                        gc.tag != "#text" and self._display(self.style_for(gc, cstyle)) not in ("inline", "inline-block")
+                        for gc in child.walk() if gc is not child) if child.tag != "#text" else False
+                    if _has_blk and child.tag not in ("span", "b", "i", "em", "strong", "u", "small", "code", "select", "button", "textarea", "input", "option"):
+                        if inline_run:
+                            cy = self._layout_inline_run(inline_run, box, style, content_x, cy, content_w,
+                                                         floats=self._floats)
+                            inline_run = []
+                        cb = self._layout_block(child, style, content_x, cy, content_w)
+                        box.children.append(cb)
+                        cy = cb.y + cb.h
+                        continue
                     inline_run.append(child)
                     continue
                 # flush inline run

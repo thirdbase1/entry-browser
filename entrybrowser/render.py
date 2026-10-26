@@ -109,6 +109,21 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box):
                 d.rounded_rectangle([x0, y0, x1, y1], radius=box.radius, fill=col)
             else:
                 d.rectangle([x0, y0, x1, y1], fill=col)
+    if box.bg_img and box.w > 2 and box.h > 2:
+        try:
+            bim, bsize = box.bg_img
+            iw, ih = int(box.w), int(box.h)
+            if isinstance(bsize, str) and "contain" in bsize:
+                sc = min(box.w / bim.width, box.h / bim.height)
+                iw, ih = max(1, int(bim.width * sc)), max(1, int(bim.height * sc))
+            elif isinstance(bsize, str) and "cover" in bsize:
+                sc = max(box.w / bim.width, box.h / bim.height)
+                iw, ih = max(1, int(bim.width * sc)), max(1, int(bim.height * sc))
+            r_im = bim.resize((max(1, iw), max(1, ih)))
+            img.paste(r_im, (int(box.x), int(box.y)), r_im)
+            d = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).Draw(img)
+        except Exception:
+            pass
     if box.border and isinstance(box.border, dict) and box.border.get("width",0) > 0:
         bcol = box.border.get("color", (0,0,0,255))
         x0, y0 = max(0, int(box.x)), max(0, int(box.y))

@@ -20,7 +20,7 @@ _KNOWN = {
     "padding","padding-top","padding-right","padding-bottom","padding-left",
     "border","border-width","border-style","border-color",
     "width","height","min-width","max-width","min-height","max-height",
-    "background","background-color","color","font-family","font-size","font-weight",
+    "background","background-color","background-image","background-size","color","font-family","font-size","font-weight",
     "font-style","line-height","text-align","text-decoration","letter-spacing",
     "text-transform","white-space","overflow","flex-direction","gap","justify-content",
     "align-items","border-radius","box-sizing","visibility","opacity","z-index",
