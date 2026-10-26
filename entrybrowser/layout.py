@@ -327,11 +327,15 @@ class Layout:
                             Layout._shift_tree(cb, fx - _ox, 0)   # moves cb.x itself
                         cb.y = cy
                     elif cfloat == "right":
-                        cb.x = content_x + content_w - cb.w
+                        _ox = cb.x
+                        _rx = content_x + content_w - cb.w
                         for fb in self._floats:
-                            if fb.w > 0 and fb.y <= cy < fb.y + fb.h and cb.x >= fb.x and cb.x < fb.x + fb.w:
-                                cb.x = fb.x - cb.w
+                            if fb.w > 0 and fb.y <= cy < fb.y + fb.h and _rx >= fb.x and _rx < fb.x + fb.w:
+                                _rx = fb.x - cb.w
                                 break
+                        _dx = _rx - _ox
+                        if _dx:
+                            Layout._shift_tree(cb, _dx, 0)
                     # absolute/fixed: honor top/left/right/bottom relative to containing box
                     pos = self._pos(cstyle)
                     if pos in ("absolute","fixed"):

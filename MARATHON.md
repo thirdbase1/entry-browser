@@ -159,3 +159,11 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
   rules this way).
 - clip-path: inset(50%) / clip: rect(0,0,0,0) -> paint skip (visually-hidden pattern).
 - Receipts: 53/53; bootstrap/wiki/pyo/BBC stable.
+
+## Batch 19 — float:right subtree shift (breakthrough #14)
+- float:right branch set cb.x WITHOUT _shift_tree — the float:left branch had it; table
+  cells/spans stayed at the pre-float x (Python wiki infobox shell floated right, contents
+  stranded in the lead text). Now both branches shift the subtree by the same delta.
+- Receipts: Python wiki infobox table 844,336 with cells at 848 inside; article overlaps
+  436 -> 412; p-p overlaps ZERO (remaining: td/th infobox internals, li column lists,
+  hidden checkboxes); 53/53; all sites stable.
