@@ -113,3 +113,10 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Receipts: MDN load 2.3s -> 0.5s. Menus render as readable link lists instead of
   overlapping smear. 53/53 tests. (MDN header chrome still stacks vertically — its nav is
   a details/summary+grid hybrid; next round.)
+
+## Batch 13 — negative grid lines + display:contents grid items
+- grid-column "1/-1": negative line numbers count from track end (clamped span).
+- display:contents elements that are GRID ITEMS: their children splice into the grid as
+  items (MDN navigation__popup pattern).
+- Receipts: MDN nav popup children now lay as grid items (menu/search/user-menu at final
+  positions); wiki 256/948, python 3, BBC 98 all stable. 53/53 tests.

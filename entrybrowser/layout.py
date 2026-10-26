@@ -571,6 +571,15 @@ class Layout:
             gm = _re.match(r"([\d.]+)px", style["gap"].strip())
             gap = float(gm.group(1)) if gm else gap
         items = [c for c in node.children if c.tag != "#text" or c.text.strip()]
+        # display:contents grid items vanish — their children become grid items
+        expanded = []
+        for it0 in items:
+            st0 = self.style_for(it0, style)
+            if str(st0.get("display") or "") == "contents":
+                expanded += [k for k in it0.children if k.tag != "#text" or k.text.strip()]
+            else:
+                expanded.append(it0)
+        items = expanded
         if not items:
             box.h = 0; return
         def parse_track_list(t):
@@ -740,10 +749,14 @@ class Layout:
                     p1 = parts[1].strip()
                     if p1.startswith("span"):
                         span = int(p1.split()[1])
-                    elif p1.isdigit():
+                    elif p1.lstrip("-").isdigit():
                         end = int(p1)
-                        if start is not None: span = max(1, end - start)
-                        else: start, span = max(1, end - 1), 1  # "X / Y": treat as span to Y
+                        if end < 0:
+                            # negative line numbers count from the end (-1 = last line)
+                            end = None  # resolved by caller via ncol
+                        if start is not None and end is not None: span = max(1, end - start)
+                        elif start is not None: span = 10**6  # "N / -1" = to the end
+                        else: start, span = max(1, (end or 2) - 1), 1
             except (ValueError, IndexError):
                 return None
             return (start, span)
@@ -807,7 +820,7 @@ class Layout:
                         if c0 + cs > ncol:
                             c0 = 0; row_i += 1
                             if row_i > 200: break
-                cs = min(cs, ncol - c0) if c0 + cs <= ncol else 1
+                cs = max(1, min(cs, ncol - c0))
                 if row_spec and row_spec[0] is not None:
                     r0 = row_spec[0] - 1
                     rs = row_spec[1]
