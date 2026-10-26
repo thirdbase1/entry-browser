@@ -299,7 +299,9 @@ class Stylesheet:
             if sels and decls:
                 ss.rules.append(Rule(sels, decls, order)); order += 1
 
-        def _walk(css_text, media_ok=True):
+        def _walk(css_text, media_ok=True, _depth=0):
+            if _depth > 24:  # malformed nesting guard
+                return
             i = 0
             n = len(css_text)
             while i < n:
@@ -317,13 +319,13 @@ class Stylesheet:
                 if sel.startswith("@media"):
                     cond = sel[6:].strip()
                     ok = media_ok and _media_ok(cond, viewport_w)
-                    _walk(body, ok)
+                    _walk(body, ok, _depth + 1)
                 elif sel.startswith("@"):
                     pass  # skip other at-rules
                 else:
                     if "{" in body:
                         # shouldn't happen for plain rules; recurse defensively
-                        _walk(sel + "{" + body + "}", media_ok)
+                        _walk(sel + "{" + body + "}", media_ok, _depth + 1)
                     else:
                         if media_ok:
                             _rule(sel, body)

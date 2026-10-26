@@ -5,8 +5,11 @@ CLI: entry-browser render <url|file> out.png [--width N]
      entry-browser text   <url|file>          (dump readable text)
      entry-browser info   <url|file>          (title, stats, timing)
 """
+
 from __future__ import annotations
-import time, os, sys
+import sys as _sys
+if _sys.getrecursionlimit() < 4000:
+    _sys.setrecursionlimit(4000)  # deeply nested real-world DOMs
 
 from .html import parse, parse_title, Node
 from .css import Stylesheet, UA
@@ -14,6 +17,7 @@ from .layout import Layout
 from .render import content_height
 from .render import render
 from . import net
+import time, os, sys
 
 class Tab:
     """One page load: everything the pipeline produces, with timings."""
@@ -190,7 +194,6 @@ class Tab:
     def download(self, url: str, out_path: str) -> str:
         """Download a resource (image/link) to disk with browser UA + cookies."""
         import shutil, base64
-        from .net import fetch as _fetch
         if url.startswith("data:"):
             header, _, payload = url.partition(",")
             out = base64.b64decode(payload) if "base64" in header else payload.encode()

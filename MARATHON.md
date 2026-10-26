@@ -144,3 +144,11 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Receipts: cnn.com load 89.5s -> 9.8s (8x, network-bound tail); MDN/python.org render
   steady; all quality metrics identical (cnn 114, bbc 88, pyo 3, wiki grid exact).
   53/53 tests.
+
+## Batch 17 — deep-DOM + malformed-CSS robustness
+- Recursion limit 4000 at import (real-world docs DOMs nest hundreds deep — bootstrap
+  docs crashed at default 1000).
+- CSS _walk depth guard (24): malformed nested at-rule bodies (stray braces) previously
+  recursed without bound -> RecursionError on en.wikipedia.org/wiki/Python_(programming_language).
+- Receipts: bootstrap docs load 0.2s, 274 leaves, only 7 overlaps (53/53 tests); Python
+  wiki article now loads (3.0s, 878 leaves — navbox tables are the next overlap front).
