@@ -77,3 +77,13 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - display:contents: element box vanishes, children join the parent's flow (CSS display L3).
 - Receipts: BBC.com/news overlaps 511 -> 88; load 8.7s -> 1.5s; vision-confirmed multi-column
   news grid with headlines/summaries/timestamps/tags. 53/53 tests.
+
+## Batch 10 — flex-shrink approximation (proportional squeeze)
+- Non-wrapping flex rows overflowing the line now squeeze non-growing items proportionally
+  to their overflow, re-laying each at its final width. Wikipedia header: landmark+logo were
+  1192+1192 in a 1192 row (logo pushed off-right at x=1236 covering Search); now 596+596.
+- Rejected: shrinking block-kid flex items to max-content directly (wikipedia page collapsed;
+  reverted). Proportional overflow squeeze is the safe variant.
+- Fresh-render vision: logo/wordmark + Main menu + title all present, no off-screen overflow;
+  remaining rough: search row wraps below menu, titlebar tabs (Article/Read) collide — both
+  pre-existing, not regressions. 53/53 tests.

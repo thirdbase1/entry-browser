@@ -477,6 +477,20 @@ class Layout:
                     g["box"] = self._layout_block(g["child"], style, 0, 0, cw)
                 else:
                     g["box"].w += per
+        # flex-shrink approximation: if non-wrapped items overflow the line, squeeze
+        # non-growing items proportionally to their overflow, then re-lay at final width.
+        if not col and not wrap:
+            total_w = sum(i["box"].w for i in items) + gap * (n - 1)
+            shrinkers = [i for i in items
+                         if float(i.get("grow") or 0 or 0) == 0
+                         and not i.get("basis") and not i["box"].style.get("width")]
+            if total_w > cw and shrinkers:
+                deficit = total_w - cw
+                base = sum(i["box"].w for i in shrinkers)
+                for it in shrinkers:
+                    cut = deficit * (it["box"].w / base if base else 0)
+                    new_w = max(40.0, it["box"].w - cut)
+                    it["box"] = self._layout_block(it["child"], style, 0, 0, new_w)
         # place
         jc = style.get("justify-content", "flex-start")
         ai = style.get("align-items", "stretch")
