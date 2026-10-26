@@ -120,3 +120,11 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
   items (MDN navigation__popup pattern).
 - Receipts: MDN nav popup children now lay as grid items (menu/search/user-menu at final
   positions); wiki 256/948, python 3, BBC 98 all stable. 53/53 tests.
+
+## Batch 14 — CSS-sized images + absolute width cap (breakthrough #11)
+- img boxes honored HTML width/height attrs but IGNORED CSS width/height (width:100% etc).
+  Now: CSS width/height first (pct resolves vs line width), attrs fallback, then cap at
+  available width (aspect preserved).
+- Absolute width:auto elements capped at containing-block width.
+- Receipts: cnn.com overlaps 1062 -> 463 (top offender was image__dam-img at intrinsic
+  2400-5154px wide); BBC 98->88; wiki/python.org stable. 53/53 tests.

@@ -269,6 +269,11 @@ class Layout:
                     cb = self._layout_block(child, style, content_x, cy, content_w)
                     self._floats = _floats_save
                     if self._pos(cstyle) in ("absolute","fixed") and not cstyle.get("width") \
+                            and cb.w > content_w:
+                        # absolute width:auto never exceeds the containing block (shrink-to-fit
+                        # against available width; images cap at natural->available)
+                        cb = self._layout_block(child, style, content_x, cy, content_w)
+                    if self._pos(cstyle) in ("absolute","fixed") and not cstyle.get("width") \
                             and (cb.w >= content_w * 0.98) and cb.children:
                         # absolute with width:auto shrink-wraps to content (CSS 10.3.7)
                         mcw = max((sp[1] + self._text_w(sp[0], "sans-serif", sp[4] or 16.0)
@@ -1162,12 +1167,19 @@ class Layout:
             if nd.tag == "br":
                 flush(); continue
             if nd.tag == "img":
-                try: w = float(nd.attr("width") or 0)
-                except Exception: w = 0
-                try: h = float(nd.attr("height") or 0)
-                except Exception: h = 0
+                ist = self.style_for(nd, parent_style)
+                w = self._len(ist.get("width"), cw) or 0
+                h = self._len(ist.get("height"), cw) or 0
+                if not w:
+                    try: w = float(nd.attr("width") or 0)
+                    except Exception: w = 0
+                if not h:
+                    try: h = float(nd.attr("height") or 0)
+                    except Exception: h = 0
                 if not w or not h:
                     w = w or 300; h = h or (w * 0.66)
+                if w > cw:  # images never exceed the available line width
+                    h = h * cw / w; w = cw
                 cur_w = sum(w2["w"] + (space_w(w2["style"]) if w2["sb"] else 0) for w2 in words)
                 if words and cur_w + w > cw: flush()
                 ib = Box(nd, self.style_for(nd, parent_style))
@@ -1195,12 +1207,19 @@ class Layout:
                 # images nested inside this inline subtree: emit placeholder boxes
                 for img_node in nd.walk():
                     if img_node.tag == "img":
-                        try: iw = float(img_node.attr("width") or 0)
-                        except Exception: iw = 0
-                        try: ih = float(img_node.attr("height") or 0)
-                        except Exception: ih = 0
+                        ist = self.style_for(img_node, parent_style)
+                        iw = self._len(ist.get("width"), cw) or 0
+                        ih = self._len(ist.get("height"), cw) or 0
+                        if not iw:
+                            try: iw = float(img_node.attr("width") or 0)
+                            except Exception: iw = 0
+                        if not ih:
+                            try: ih = float(img_node.attr("height") or 0)
+                            except Exception: ih = 0
                         if not iw or not ih:
                             iw = iw or 300; ih = ih or (iw * 0.66)
+                        if iw > cw:
+                            ih = ih * cw / iw; iw = cw
                         cur_w = sum(w2["w"] + (space_w(w2["style"]) if w2["sb"] else 0) for w2 in words)
                         if words and cur_w + iw > cw: flush()
                         ib = Box(img_node, self.style_for(img_node, parent_style))
