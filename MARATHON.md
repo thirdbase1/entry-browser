@@ -106,3 +106,10 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Receipts: MDN logo track 316 -> 138 (content-sized), search 1fr 1126; BBC overlaps 98
   (from 88 pure-fr — within noise); wikipedia mw-content-text 256/948 unchanged; ul float
   containment intact. 53/53 tests.
+
+## Batch 12 — <details>/<summary> collapse (breakthrough #10)
+- 119 <details> elements on MDN laid their ENTIRE subtree (menus expanded inline). Now:
+  details without open attr lays only its <summary>; content hidden (native HTML behavior).
+- Receipts: MDN load 2.3s -> 0.5s. Menus render as readable link lists instead of
+  overlapping smear. 53/53 tests. (MDN header chrome still stacks vertically — its nav is
+  a details/summary+grid hybrid; next round.)

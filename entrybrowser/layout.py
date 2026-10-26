@@ -245,6 +245,16 @@ class Layout:
                 # floats whose bottom is above the current y no longer constrain anything
                 if self._floats and cy > 0:
                     self._floats = [fb for fb in self._floats if fb.y + fb.h > cy - 1]
+                if child is not None and child.tag == "details" and child.attr("open") is None:
+                    # <details> collapsed: lay only the <summary> line
+                    for sub in child.children:
+                        if sub.tag == "summary":
+                            cb = self._layout_block(sub, style, content_x, cy, content_w)
+                            box.children.append(cb)
+                            cy = cb.y + cb.h
+                            inline_run = []
+                            break
+                    continue
                 if str(cstyle.get("display") or "") == "contents":
                     # display:contents — the element's box vanishes; its children are
                     # laid directly into this container's flow (CSS display L3)
