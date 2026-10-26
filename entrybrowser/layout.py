@@ -245,6 +245,14 @@ class Layout:
                 # floats whose bottom is above the current y no longer constrain anything
                 if self._floats and cy > 0:
                     self._floats = [fb for fb in self._floats if fb.y + fb.h > cy - 1]
+                if str(cstyle.get("display") or "") == "contents":
+                    # display:contents — the element's box vanishes; its children are
+                    # laid directly into this container's flow (CSS display L3)
+                    sub = self._layout_block(child, style, content_x, cy, content_w)
+                    for gc in sub.children:
+                        box.children.append(gc)
+                    cy = sub.y + sub.h
+                    continue
                 if cfloat in ("left","right") or self._pos(cstyle) in ("absolute","fixed"):
                     _floats_save = self._floats
                     self._floats = list(_floats_save)   # float context is per containing block
@@ -356,6 +364,16 @@ class Layout:
                                         ("p","ul","ol","table","img","h1","h2","h3","h4","h5","h6","pre","blockquote")))
                                         for c in _flow_kids)
             box.h = (cy + pb + bt) - box.y
+            # aspect-ratio: w / h — height derives from width when height is auto
+            _ar = style.get("aspect-ratio")
+            if _ar and not H and box.w > 0:
+                try:
+                    parts_ar = str(_ar).split("/")
+                    ar = float(parts_ar[0]) / float(parts_ar[1])
+                except (ValueError, ZeroDivisionError):
+                    ar = None
+                if ar:
+                    box.h = max(box.h, box.w / ar + pt + bt)
             if _fl_kids:
                 _bfc = str(style.get("overflow", "visible")) not in ("visible", None, "None")
                 _flow_kids = [c for c in box.children if not getattr(c, "_is_float", False)]
@@ -657,6 +675,29 @@ class Layout:
             else:
                 widths.append(val)
         # build cell grid: named areas (grid-area: <name>) or source order
+        # grid-column / grid-row: "N", "N / span M", "span M", "N / M" (CSS Grid §8)
+        def _line_spec(v):
+            """Return (start, span) 1-based start or None for auto."""
+            if not isinstance(v, str) or not v.strip():
+                return None
+            parts = [p.strip() for p in v.split("/")]
+            start = None; span = 1
+            try:
+                if parts[0].startswith("span"):
+                    span = int(parts[0].split()[1])
+                elif parts[0].isdigit():
+                    start = int(parts[0])
+                if len(parts) > 1:
+                    p1 = parts[1].strip()
+                    if p1.startswith("span"):
+                        span = int(p1.split()[1])
+                    elif p1.isdigit():
+                        end = int(p1)
+                        if start is not None: span = max(1, end - start)
+                        else: start, span = max(1, end - 1), 1  # "X / Y": treat as span to Y
+            except (ValueError, IndexError):
+                return None
+            return (start, span)
         area_of = {}
         cell_grid = {}
         grid = []
@@ -701,11 +742,34 @@ class Layout:
             grid = [g for g in grid if g]
         elif not grid:
             col_i = row_i = 0
+            occupied_gc: set = set()
             for child in items:
-                grid.append((row_i, col_i, row_i, col_i, child))
-                col_i += 1
+                cst = self.style_for(child, style)
+                col_spec = _line_spec(cst.get("grid-column"))
+                row_spec = _line_spec(cst.get("grid-row"))
+                if col_spec and col_spec[0] is not None:
+                    c0 = min(col_spec[0] - 1, ncol - 1)
+                    cs = col_spec[1]
+                else:
+                    # auto-place at next free column in current row
+                    c0 = col_i; cs = col_spec[1] if col_spec else 1
+                    while any((row_i, c0 + k) in occupied_gc for k in range(cs)) or c0 + cs > ncol:
+                        c0 += 1
+                        if c0 + cs > ncol:
+                            c0 = 0; row_i += 1
+                            if row_i > 200: break
+                cs = min(cs, ncol - c0) if c0 + cs <= ncol else 1
+                if row_spec and row_spec[0] is not None:
+                    r0 = row_spec[0] - 1
+                    rs = row_spec[1]
+                else:
+                    r0 = row_i; rs = row_spec[1] if row_spec else 1
+                grid.append((r0, c0, r0 + rs - 1, c0 + cs - 1, child))
+                for k in range(cs):
+                    occupied_gc.add((row_i, c0 + k))
+                col_i = c0 + cs
                 if col_i >= ncol:
-                    col_i = 0; row_i += 1
+                    col_i = 0; row_i += rs if rs > 1 else 1
         # row heights: auto — measure each item
         nrows = (max(g[2] for g in grid) + 1) if grid else 1
         row_h = [0.0] * nrows

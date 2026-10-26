@@ -68,3 +68,12 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - top/bottom % now resolve against parent HEIGHT (was width).
 - E2E receipt: toggling Main menu checkbox opens the full sidebar nav (Main page / Contents /
   Current events / Random article / ... + Contribute section) — vision-confirmed. 53/53.
+
+## Batch 9 — grid-column/grid-row SPANS + aspect-ratio + display:contents (breakthrough #9)
+- BBC news grid: `grid-column: 1 / span 18` was IGNORED — every grid item auto-placed into
+  ONE track (w=53 of 1280), all cards collapsed. Implemented grid-column/grid-row parsing
+  ("N", "N / span M", "span M", "N / M") with occupied-cell auto-placement.
+- aspect-ratio: w / h derives height from width (BBC ImageCard 16/9 boxes).
+- display:contents: element box vanishes, children join the parent's flow (CSS display L3).
+- Receipts: BBC.com/news overlaps 511 -> 88; load 8.7s -> 1.5s; vision-confirmed multi-column
+  news grid with headlines/summaries/timestamps/tags. 53/53 tests.

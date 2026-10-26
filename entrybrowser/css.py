@@ -17,7 +17,7 @@ INHERITED = {
 # property names we understand (everything else parses but is ignored)
 _KNOWN = {
     "display","position","margin","margin-top","margin-right","margin-bottom","margin-left",
-    "padding","padding-top","padding-right","padding-bottom","padding-left",
+    "padding","padding-top","padding-right","padding-bottom","padding-left","aspect-ratio",
     "border","border-width","border-style","border-color",
     "width","height","min-width","max-width","min-height","max-height",
     "background","background-color","background-image","background-size","color","font-family","font-size","font-weight",
