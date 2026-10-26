@@ -1,0 +1,9 @@
+[project]
+name = "entrybrowser"
+version = "0.1.0"
+description = "A fast, lightweight, from-scratch web browser engine in pure Python"
+requires-python = ">=3.10"
+dependencies = ["pillow", "requests"]
+
+[project.scripts]
+entry-browser = "entrybrowser:main"
