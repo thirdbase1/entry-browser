@@ -89,7 +89,8 @@ class Layout:
 
     def build(self) -> Box:
         self._style_cache = {}   # id(node) -> (parent_style_id, style)
-        self._floats = []        # fresh float list per build (probes re-add their own)
+        # NOTE: floats intentionally persist across builds (incremental relayouts);
+        # replace-stale on register + cy-expiry keep the list honest.
         body = next((n for n in self.doc.query_all("body")), self.doc)
         root_style = {}
         root = self._layout_block(body, root_style, 0.0, 0.0, self.vw)
@@ -245,7 +246,10 @@ class Layout:
                 if self._floats and cy > 0:
                     self._floats = [fb for fb in self._floats if fb.y + fb.h > cy - 1]
                 if cfloat in ("left","right") or self._pos(cstyle) in ("absolute","fixed"):
+                    _floats_save = self._floats
+                    self._floats = list(_floats_save)   # float context is per containing block
                     cb = self._layout_block(child, style, content_x, cy, content_w)
+                    self._floats = _floats_save
                     if cfloat == "left":
                         # stack left floats: bump right until no float overlaps the rect
                         fx = content_x

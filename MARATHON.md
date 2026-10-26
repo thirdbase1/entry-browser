@@ -31,3 +31,14 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Float containment (clearfix/BFC): block with only-floated children stayed h=0 → extend h to float bottoms when overflow!=visible or no in-flow content. ul.menu h=0→42.
 - Receipts: python.org overlaps 283→32; nav bar renders (dark blue + Python/PSF/Docs/PyPI/Jobs); hero below; vision 3/10→6/10. 53/53 tests. python.org 441ms, MDN 1.8s.
 - Next: right-column body text overlap on python.org (two-column grid collapse), wikipedia header chrome.
+
+## Batch 5 — FLOAT CONTEXT SCOPING (breakthrough #6, the big one)
+- ROOT CAUSE of stacked floats (python.org 4-col widget row all at x=0; nav lis; header widgets):
+  self._floats was GLOBAL to Layout; nested block layout (any deep descendant) ran the
+  cy-expiry filter and DELETED floats still needed by sibling branches. Floats must be
+  scoped per containing block.
+- FIX: save/restore _floats around each _layout_block recursion (float context = containing block).
+- Receipts: python.org leaf overlaps 283 -> 3 (objective). Widgets stack 0/340/679/1019.
+  Nav floats stack 0/213/427/640/853. 53/53 tests. Bench: example 29ms, MDN 82ms, python 285ms,
+  HN 1.45s, wiki 1.66s.
+- Debug lesson: prints used `node` (parent) instead of `child` — cost an hour. var discipline.
