@@ -677,17 +677,42 @@ class Layout:
         # named-area map from style (grid-area on children is handled below via raw css)
         ncol = len(cols)
         parsed = [track_w(c, cw) for c in cols]
+        # measure natural (max-content) width of each item for min/max-content tracks
+        nat_w = [0.0] * ncol
+        has_content_track_early = any(k == "auto" for k, v, m in parsed)
+        for child in (items if has_content_track_early else []):
+            cst = self.style_for(child, style)
+            col_spec_n = _line_spec(cst.get("grid-column")) if "_line_spec" in dir() else None
+            probe = self._layout_block(child, style, 0, 0, cw)
+            def _sub_max(b):
+                m = 0.0
+                for sp in getattr(b, "spans", []):
+                    m = max(m, sp[1] - b.x + self._text_w(sp[0], "sans-serif", sp[4] or 16.0))
+                for k in b.children:
+                    m = max(m, _sub_max(k))
+                return m
+            mc = min(max(_sub_max(probe) + 8, probe.w if probe.w < cw else 0), cw * 0.9)
+            if probe.w > 0 and probe.w < cw * 0.95:
+                mc = probe.w
+            nat_w[0] = max(nat_w[0], mc)  # single-column attribution fallback
+        has_content_track = any(k in ("auto",) for k, v, m in parsed)
         fr_total = sum(p[1] for p in parsed if p[0] == "fr")
+        content_total = sum(nat_w)
         fixed = sum(p[1] for p in parsed if p[0] == "px")
-        fr_avail = max(0, cw - fixed - gap*(ncol-1))
+        content_cols = sum(1 for k, v, m in parsed if k == "auto")
+        fr_avail = max(0, cw - fixed - content_total - gap*(ncol-1))
         widths = []
-        for kind, val, mn in parsed:
+        for ci, (kind, val, mn) in enumerate(parsed):
             if kind == "fr":
                 widths.append(max(mn, fr_avail * (val/fr_total if fr_total else 0)))
             elif kind == "auto":
-                widths.append(max(mn, (cw - fixed) / max(1, ncol)))
+                # min-content / max-content / auto tracks size to content
+                nat = nat_w[ci] if ci < len(nat_w) else 0
+                widths.append(max(mn, nat if nat > 0 else max(mn, (cw - fixed) / max(1, ncol))))
             else:
                 widths.append(val)
+        if sum(widths) < cw:
+            widths[-1] += cw - sum(widths)  # stretch last track (1fr behavior if it was fr)
         # build cell grid: named areas (grid-area: <name>) or source order
         # grid-column / grid-row: "N", "N / span M", "span M", "N / M" (CSS Grid §8)
         def _line_spec(v):

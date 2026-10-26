@@ -87,3 +87,22 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Fresh-render vision: logo/wordmark + Main menu + title all present, no off-screen overflow;
   remaining rough: search row wraps below menu, titlebar tabs (Article/Read) collide — both
   pre-existing, not regressions. 53/53 tests.
+
+## Site loop: github.com/microsoft/vscode
+- 32s load (huge asset count), 233 leaves, only 53 overlaps. Vision: unstyled flow, no repo
+  content — GitHub core content is client-hydrated ({{ message }} template uninterpolated).
+  Boundary = JS hydration, not CSS/layout. No engine bug to fix here; a real no-JS browser
+  gets the same skeleton.
+## Wiki tabs verdict
+- "Read"/"View history" tabs w=0 = computed display:none (faithful to wiki CSS for the
+  selected view). Not a bug.
+
+## Batch 11 — min/max-content grid tracks (content-sized columns)
+- grid-template 'min-content 1fr min-content min-content' sized every track evenly (auto
+  branch divided evenly); MDN header nav collapsed. Now: auto/min-content/max-content tracks
+  measure item max-content via probe, fr tracks get the remainder, last track absorbs slack.
+- Probe guarded: only runs when content tracks exist (no float pollution, no perf hit for
+  pure-fr grids like BBC).
+- Receipts: MDN logo track 316 -> 138 (content-sized), search 1fr 1126; BBC overlaps 98
+  (from 88 pure-fr — within noise); wikipedia mw-content-text 256/948 unchanged; ul float
+  containment intact. 53/53 tests.
