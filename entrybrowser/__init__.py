@@ -290,15 +290,25 @@ class Tab:
             for c in b.children:
                 walk(c)
         walk(self.root_box)
-        if not targets:
-            return
         base = self.final_url or ""
         def load(b):
             im = get_image(b.node.attr("src"), base)
             if im is not None:
                 b.img = (im, b.x, b.y, b.w, b.h)
+        bg_targets = []
+        def walk2(b):
+            if isinstance(getattr(b, "bg_img", None), tuple) and isinstance(b.bg_img[0], str):
+                bg_targets.append(b)
+            for c in b.children:
+                walk2(c)
+        walk2(self.root_box)
+        def load_bg(b):
+            im = get_image(b.bg_img[0], base)
+            if im is not None:
+                b.bg_img = (im, b.bg_img[1])
         with ThreadPoolExecutor(max_workers=8) as ex:
             list(ex.map(load, targets))
+            list(ex.map(load_bg, bg_targets))
     def render_png(self, out_path: str, height=None) -> str:
         t = time.perf_counter()
         h = height or max(600, content_height(self.root_box))

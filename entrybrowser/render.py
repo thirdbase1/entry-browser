@@ -111,6 +111,9 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box):
                 d.rectangle([x0, y0, x1, y1], fill=col)
     if box.bg_img and box.w > 2 and box.h > 2:
         try:
+            from PIL import Image as _PILImage
+            if not isinstance(box.bg_img[0], _PILImage.Image):
+                raise ValueError
             bim, bsize = box.bg_img
             iw, ih = int(box.w), int(box.h)
             if isinstance(bsize, str) and "contain" in bsize:

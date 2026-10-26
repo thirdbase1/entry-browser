@@ -160,13 +160,11 @@ class Layout:
         bi = style.get("background-image")
         if isinstance(bi, str) and "url(" in bi:
             try:
-                from .images import get_image as _gi
                 from urllib.parse import urljoin as _uj
                 u = bi[bi.index("url(") + 4: bi.index(")", bi.index("url("))].strip().strip("'\"")
                 if u.startswith("//"): u = "https:" + u
                 elif not u.startswith("http"): u = _uj(getattr(self, "base_url", "") or "", u)
-                im = _gi(u, "")
-                if im is not None: box.bg_img = (im, style.get("background-size"))
+                box.bg_img = (u, style.get("background-size"))  # resolved to Image at image-load pass
             except Exception:
                 pass
         box.border = style.get("border")
@@ -219,9 +217,10 @@ class Layout:
                     # CSS: a block-level descendant inside an inline element forces the
                     # inline to split into anonymous blocks; approximate by laying the
                     # whole inline element as a block when it contains block children.
+                    _kids = [gc for gc in getattr(child, "children", []) if gc.tag != "#text"]
                     _has_blk = any(
-                        gc.tag != "#text" and self._display(self.style_for(gc, cstyle)) not in ("inline", "inline-block")
-                        for gc in child.walk() if gc is not child) if child.tag != "#text" else False
+                        self._display(self.style_for(gc, cstyle)) not in ("inline", "inline-block")
+                        for gc in _kids)
                     if _has_blk and child.tag not in ("span", "b", "i", "em", "strong", "u", "small", "code", "select", "button", "textarea", "input", "option"):
                         if inline_run:
                             cy = self._layout_inline_run(inline_run, box, style, content_x, cy, content_w,
