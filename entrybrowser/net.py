@@ -68,3 +68,17 @@ def fetch(url: str, timeout=15, use_cache=True) -> tuple[str, str, int]:
         except Exception: pass
     text = body.decode(resp.encoding or "utf-8", "replace")
     return text, resp.url, resp.status_code
+
+def fetch_raw(url: str, timeout=15) -> tuple[bytes, str, int]:
+    """Return (raw_bytes, final_url, status) without text decoding."""
+    headers = {"User-Agent": UA, "Accept-Encoding": "gzip", "Accept": "image/*,*/*"}
+    cj = JAR.header(url)
+    if cj:
+        headers["Cookie"] = cj
+    resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+    JAR.store(resp.url, resp)
+    body = resp.content
+    if resp.headers.get("Content-Encoding") == "gzip" or body[:2] == b"\x1f\x8b":
+        try: body = gzip.decompress(body)
+        except Exception: pass
+    return body, resp.url, resp.status_code

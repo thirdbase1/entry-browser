@@ -18,8 +18,15 @@ def get_image(src: str, base_url: str = "", timeout=10):
         except Exception:
             return None
     else:
+        if src.startswith("//"):
+            src = "https:" + src
         if not src.startswith("http") and base_url:
             src = urljoin(base_url, src)
+        # normalize wikimedia hosts + strip tracking params (thumb host 403s clients)
+        if "thumb.wikimedia.org" in src:
+            src = src.replace("thumb.wikimedia.org", "upload.wikimedia.org")
+        if "utm_" in src:
+            src = src.split("?")[0]
         if not src.startswith("http"):
             # local file
             try:
@@ -30,15 +37,10 @@ def get_image(src: str, base_url: str = "", timeout=10):
         if src in _decoded:
             return _decoded[src]
         try:
-            body, _, status = fetch(src, timeout=timeout)
+            from .net import fetch_raw
+            data, final, status = fetch_raw(src, timeout=timeout)
             if status != 200:
                 return None
-            import requests as _r
-            # fetch() decodes text — need raw bytes; refetch raw:
-            import requests
-            resp = requests.get(src, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"},
-                                timeout=timeout)
-            data = resp.content
         except Exception:
             return None
     try:
