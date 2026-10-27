@@ -357,3 +357,16 @@ Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.
   needed ~580 — flex-item shrink measure must include inline-block preferred
   widths; 4px). pxxl counter spans and hero word now both live in DOM.
 - 53/53. Head: batch 31 pushed.
+
+## Batch 31 — nested overflow-hidden clip rewrite (2026-10-28)
+- Chromium ground-truth comparison (playwright chromium, all 4 test sites): found the
+  hero mockup's chat pane content (toolbar, file chips, composer) silently missing.
+- Root cause: the crop-based clipped-layer path dropped nested content (crop coords
+  double-shifted inside parent layers; children painted outside the crop). Crop+paste
+  replaced with a box-sized RGBA overlay painted at true absolute coords, then
+  alpha-composited back through a rounded-rect mask. Handles arbitrary nesting.
+- Perf: fontTools cmap decompile cached module-level (`_CMAPS`) — python.org render
+  5.9s -> ~1s (cmap was re-parsed per span run).
+- Receipts: EA mockup now shows toolbar (12 tools | 3/4 | 42s), all 3 file chips,
+  composer placeholder, Claude Opus 4.6 + send button. Bench: example 29ms,
+  HN 1.45s, wikipedia 1.2s, MDN 0.4s; 53/53.

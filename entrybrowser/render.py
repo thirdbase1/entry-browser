@@ -60,6 +60,7 @@ def _paint_layer_children(layer, ld, box, x0, y0):
             pass
 
 _LAYER_SHIFT = []  # (dx,dy) applied to all absolute coords painted into clipped layers
+_CMAPS = {}  # fpath -> fontTools cmap (persistent across renders)
 
 def _shift_pt(x, y):
     if _LAYER_SHIFT:
@@ -75,27 +76,40 @@ def _paint(img, d: ImageDraw.ImageDraw, box: Box):
         return
     ovf = box.style.get("overflow") if isinstance(box.style, dict) else None
     if ovf == "hidden" and box.children:
-        # paint into clipped layer
         try:
-            # crop coords must be in the CURRENT surface's space: when painting into
-            # a parent layer, absolute coords were shifted — apply the same shift.
-            _bx, _by = box.x, box.y
-            if _LAYER_SHIFT:
-                _dx, _dy = _LAYER_SHIFT[-1]
-                _bx, _by = _bx + _dx, _by + _dy
-            x0, y0 = max(0, int(_bx)), max(0, int(_by))
-            x1, y1 = int(_bx + box.w), int(_by + box.h)
-            if x1 > x0 and y1 > y0 and x1 <= img.width and y1 <= img.height:
-                layer = img.crop((x0, y0, x1, y1))
-                ld = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).Draw(layer)
-                # paint children with coordinates translated into layer space
-                _LAYER_SHIFT.append((-x0, -y0))
-                try:
-                    _paint_plain(layer, ld, box)
-                finally:
-                    _LAYER_SHIFT.pop()
-                img.paste(layer, (x0, y0))
-                return
+            from PIL import Image as _Image2
+            _bw, _bh = max(1, int(box.w)), max(1, int(box.h))
+            ov = _Image2.new("RGBA", (_bw, _bh), (0, 0, 0, 0))
+            ovd = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).Draw(ov)
+            _bx2 = box.x; _by2 = box.y
+            box.x = 0.0; box.y = 0.0
+            def _shift_tree(b, dx, dy):
+                b.x += dx; b.y += dy
+                if getattr(b, "spans", None):
+                    b.spans = [tuple([sp[0], sp[1] + dx, sp[2] + dy] + list(sp[3:])) for sp in b.spans]
+                for c in (b.children or []): _shift_tree(c, dx, dy)
+            _shift_tree(box, -_bx2, -_by2)
+            try:
+                _paint_plain(ov, ovd, box)
+            finally:
+                _shift_tree(box, _bx2, _by2)
+                box.x = _bx2; box.y = _by2
+            comp = ov  # proper alpha; composite handles transparent underlay
+            _rx = getattr(box, "radius", 0) or 0
+            if _rx:
+                mask = _Image2.new("L", (_bw, _bh), 0)
+                _md = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).Draw(mask)
+                _md.rounded_rectangle([0, 0, _bw - 1, _bh - 1], radius=_rx, fill=255)
+                from PIL import ImageChops as _IC
+                comp.putalpha(_IC.multiply(comp.split()[3], mask))
+            _cx0, _cy0 = max(0, int(_bx2)), max(0, int(_by2))
+            _cx1, _cy1 = min(img.width, int(_bx2) + _bw), min(img.height, int(_by2) + _bh)
+            if _cx1 > _cx0 and _cy1 > _cy0:
+                base = img.crop((_cx0, _cy0, _cx1, _cy1)).convert("RGBA")
+                _off = comp.crop((_cx0 - int(_bx2), _cy0 - int(_by2), _cx1 - int(_bx2), _cy1 - int(_by2)))
+                merged = _Image2.alpha_composite(base, _off)
+                img.paste(merged.convert(img.mode), (_cx0, _cy0))
+            return
         except Exception:
             pass
     _paint_plain(img, d, box, _top=False)
@@ -554,9 +568,9 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box, _top=True):
             try:
                 m = getattr(f, "getmask", None)
                 from fontTools.ttLib import TTFont as _TTF
-                if fpath not in _gfonts.get("_cmaps", {}):
-                    _gfonts.setdefault("_cmaps", {})[fpath] = _TTF(fpath).getBestCmap()
-                cm = _gfonts["_cmaps"][fpath]
+                if fpath not in _CMAPS:
+                    _CMAPS[fpath] = _TTF(fpath).getBestCmap()
+                cm = _CMAPS[fpath]
                 ok = ord(ch) in cm
             except Exception:
                 ok = True
