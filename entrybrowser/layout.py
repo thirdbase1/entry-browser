@@ -1323,14 +1323,14 @@ class Layout:
         if line_h < 3: line_h = line_h * font_size
         try:
             _fm_asc, _fm_desc = self._font(family, font_size,
-                str(parent_style.get("font-weight","normal")) in ("bold","bolder","700","800","900"),
+                str(parent_style.get("font-weight","normal")) in ("bold","bolder","600","700","800","900"),
                 str(parent_style.get("font-style","normal")) in ("italic","oblique")).getmetrics()
             line_h = max(line_h, _fm_asc + _fm_desc)  # glyph box must fit the line box
         except Exception:
             pass
         base_style = {
             "family": family, "size": font_size,
-            "bold": str(parent_style.get("font-weight","normal")) in ("bold","bolder","700","800","900"),
+            "bold": str(parent_style.get("font-weight","normal")) in ("bold","bolder","600","700","800","900"),
             "italic": str(parent_style.get("font-style","normal")) in ("italic","oblique"),
             "color": parent_style.get("color") or (0,0,0,255),
             "underline": str(parent_style.get("text-decoration","none")) == "underline",
@@ -1403,7 +1403,7 @@ class Layout:
             """Merge an inline element's computed style into the running word style."""
             cstyle = self.style_for(nd, parent_style)
             s2 = dict(st)
-            if str(cstyle.get("font-weight","normal")) in ("bold","bolder","700","800","900"):
+            if str(cstyle.get("font-weight","normal")) in ("bold","bolder","600","700","800","900"):
                 s2["bold"] = True
             if str(cstyle.get("font-style","normal")) in ("italic","oblique"):
                 s2["italic"] = True
@@ -1527,7 +1527,7 @@ class Layout:
                 cstyle = self.style_for(c, {"font-size": st["size"], "color": st["color"]})
                 # merge deeper styles
                 s2 = dict(st)
-                if str(cstyle.get("font-weight","normal")) in ("bold","bolder","700","800","900"): s2["bold"] = True
+                if str(cstyle.get("font-weight","normal")) in ("bold","bolder","600","700","800","900"): s2["bold"] = True
                 if str(cstyle.get("font-style","normal")) in ("italic","oblique"): s2["italic"] = True
                 if cstyle.get("color"): s2["color"] = cstyle["color"]
                 if c.tag == "a":
