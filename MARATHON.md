@@ -216,3 +216,11 @@ Receipts: mozosubz.xyz overlaps 4->0; CNN 64->40; entry-agents.dev light theme c
   right-panel overflow; entry-agents.dev + all sites stable.
 - test_live_example_com: whitespace-normalize (example.com copy now wraps).
 Receipts: mozosubz.xyz 0 overlaps, tiles even, panels inside viewport; 53/53.
+
+## Batch 23 — font-metrics line-box floor (glyph clip killer)
+- Line height floored at PIL font ascent+descent (line_h = max(css_line_h, asc+desc)):
+  36px h1 at leading-[1.03] drew 43px-tall glyphs in a 37px box → descender collision
+  with the next block. Now the glyph box always fits the line box.
+- entry-agents.dev hero H1/paragraph overlap GONE (vision-confirmed clean).
+- mozosubz.xyz para/CTA boundary flush; objective pixel check shows descenders fully
+  painted above the button top (no clip).

@@ -1150,6 +1150,13 @@ class Layout:
         try: line_h = float(line_h)
         except (TypeError, ValueError): line_h = 1.2
         if line_h < 3: line_h = line_h * font_size
+        try:
+            _fm_asc, _fm_desc = self._font(family, font_size,
+                str(parent_style.get("font-weight","normal")) in ("bold","bolder","700","800","900"),
+                str(parent_style.get("font-style","normal")) in ("italic","oblique")).getmetrics()
+            line_h = max(line_h, _fm_asc + _fm_desc)  # glyph box must fit the line box
+        except Exception:
+            pass
         base_style = {
             "family": family, "size": font_size,
             "bold": str(parent_style.get("font-weight","normal")) in ("bold","bolder","700","800","900"),
