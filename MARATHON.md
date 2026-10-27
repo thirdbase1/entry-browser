@@ -270,3 +270,14 @@ Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.
 - pxxl.app pipeline: real fetch() via __pyFetch + virtual clock (Date.now/
   performance.now advance with timer pump) — FAQ section now renders client-side.
 - Bench: example 28ms, HN 1.47s, python.org 319ms, wikipedia 1.29s, MDN 443ms. 53/53.
+
+## Batch 27 — nested overflow-hidden layer fix (breakthrough #20)
+
+- **Root cause**: _paint()'s overflow-hidden layer path cropped/offset in ABSOLUTE
+  coords even when already painting INTO a parent layer (nested layers: EA
+  section overflow-hidden > frame overflow-hidden > chat overflow-hidden). Crop
+  coords + box coords now translated by _LAYER_SHIFT[-1]; _paint_plain applies the
+  active shift unconditionally (was only when _top=True), so spans land in layer
+  space at every depth. `global _LAYER_SHIFT` hoisted (SyntaxError fix).
+- Result: entry-agents.dev hero-mockup chat bubble + "Build the auth flow with
+  GitHub OAuth" text renders. moz 0 text overlaps; EA 1; pxxl renders; 53/53.
