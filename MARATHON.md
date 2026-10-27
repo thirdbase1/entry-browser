@@ -370,3 +370,11 @@ Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.
 - Receipts: EA mockup now shows toolbar (12 tools | 3/4 | 42s), all 3 file chips,
   composer placeholder, Claude Opus 4.6 + send button. Bench: example 29ms,
   HN 1.45s, wikipedia 1.2s, MDN 0.4s; 53/53.
+
+## Batch 32 — border-radius length parsing (2026-10-28)
+- Chromium comparison on mozosubz.xyz: Deposit button painted full-bleed square.
+  Root cause: `.rounded-lg { border-radius: var(--radius) }` — var() substituted
+  correctly (`.875rem`) but layout.py discarded ANY string radius
+  (`isinstance(str) -> 0.0`). Added `_parse_len` (px/rem/em/pt) for both radius
+  sites. Pills/rounded cards now render on Tailwind sites using var-based radii.
+- Receipts: Deposit Funds = emerald pill ✓; bench + 53/53 green.

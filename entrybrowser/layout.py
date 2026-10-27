@@ -9,6 +9,29 @@ from __future__ import annotations
 from .html import Node
 from .css import Stylesheet, UA, parse_color
 
+def _parse_len(v, style=None):
+    """Parse a CSS length (px/rem/em/%/pt) to px float; None on failure."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    if not isinstance(v, str):
+        return 0.0
+    v = v.strip()
+    try:
+        if v.endswith("px"):
+            return float(v[:-2])
+        if v.endswith("rem"):
+            return float(v[:-3]) * 16.0
+        if v.endswith("em"):
+            return float(v[:-2]) * 16.0
+        if v.endswith("pt"):
+            return float(v[:-2]) * 96.0 / 72.0
+        if v.endswith("%"):
+            return 0.0  # percent radius unsupported (needs box dims)
+        return float(v)
+    except ValueError:
+        return 0.0
+
+
 class Box:
     __slots__ = ("node","x","y","w","h","children","style","text_lines","_is_float",
                  "bg","border","radius","is_text","spans","img","is_widget","transform","bg_img")
@@ -280,9 +303,7 @@ class Layout:
             except Exception:
                 pass
         box.border = style.get("border")
-        box.radius = style.get("border-radius", 0.0) or 0.0
-        if isinstance(box.radius, str):
-            box.radius = 0.0
+        box.radius = _parse_len(style.get("border-radius", 0.0), style)
         box.transform = self._parse_transform(style.get("transform"))
         mt, mr, mb, ml = (self._len(style.get(f"margin-{k}"), cw) for k in ("top","right","bottom","left"))
         pt, pr, pb, pl = (self._len(style.get(f"padding-{k}"), cw) for k in ("top","right","bottom","left"))
@@ -1254,8 +1275,7 @@ class Layout:
         box = Box(nd, style)
         box.bg = style.get("background-color")
         box.border = style.get("border")
-        box.radius = style.get("border-radius", 0.0) or 0.0
-        if isinstance(box.radius, str): box.radius = 0.0
+        box.radius = _parse_len(style.get("border-radius", 0.0), style)
         t = nd.tag
         # default sizes
         if t == "input":
