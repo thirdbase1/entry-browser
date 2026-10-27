@@ -507,6 +507,16 @@ class Layout:
                             _ik[0].attr("height", str(int(_w0 / (float(_q1) / float(_q2)))))
                         except Exception: pass
                     c0 = _ik[0]
+            if c0.tag in ("script", "style", "template", "link", "meta", "head", "title"):
+                continue
+            _oof = False
+            try:
+                _cs = self.style_for(c0, style)
+                if _cs.get("display") == "none":
+                    continue
+                _oof = _cs.get("position") in ("fixed", "absolute")
+            except Exception:
+                pass
             if c0.tag != "#text" or c0.text.strip():
                 if c0.tag == "#text":
                     # anonymous inline: wrap bare text in a span so the flex item
@@ -516,6 +526,15 @@ class Layout:
                     c0.parent = _span
                     c0 = _span
                 raw_items.append(c0)
+        _oof_nodes = set()
+        # (oof flags captured during the child loop above; rebuild by re-checking)
+        for _c in node.children:
+            try:
+                _cs = self.style_for(_c, style)
+                if _cs.get("position") in ("fixed", "absolute") and _cs.get("display") != "none":
+                    _oof_nodes.add(id(_c))
+            except Exception:
+                pass
         # measure natural sizes — shrink-to-fit (max-content capped at container)
         def _max_content_w(b):
             """Max-content width of a laid-out box: longest unwrapped text run."""
@@ -600,6 +619,28 @@ class Layout:
         for idx, it in enumerate(items):
             cb = it["box"]
             w, h = cb.w, cb.h
+            # flex-item margins (row: left/top; CSS auto margins unsupported here)
+            try:
+                _iml = self._len(it["child"] and self.style_for(it["child"], style).get("margin-left"), cw) or 0.0
+                _imt = self._len(self.style_for(it["child"], style).get("margin-top"), cw) or 0.0
+            except Exception:
+                _iml = _imt = 0.0
+            if it["child"] is not None and id(it["child"]) in _oof_nodes:
+                # fixed/absolute flex children are out of flow: lay them at the
+                # container origin without consuming cursor space
+                nb = self._layout_block(it["child"], style, cx, cy, cw)
+                box.children.append(nb)
+                it["_oof"] = True
+                continue
+            if _iml: x += _iml; line_used += _iml
+            if not col:
+                    # margin-left eats the item's available width (w-full items
+                    # must not overflow the container's right edge)
+                    w = min(w, max(0.0, cw - (x - cx) - _iml + _iml))
+                    w = min(cb.w, max(0.0, cw - (x - cx)))
+                    cb.w = w
+            if _imt and (idx == 0 or col):
+                y += _imt
             if not col and wrap and line_used + w + gap > cw and placed:
                 # new line: reset x, advance y by tallest
                 x = cx; y += cross_max + gap
@@ -621,8 +662,17 @@ class Layout:
         # (probe passes may have crushed nested absolutely-positioned subtrees).
         for idx, it in enumerate(items):
             cb = it["box"]
+            if it.get("_oof"):
+                continue
             if cb.w > 0 and cb.node is not None:
-                nb = self._layout_block(it["child"], style, cb.x, cb.y, cb.w)
+                # placement already advanced the cursor by the item's margin-left;
+                # _layout_block adds margin-left again when computing content_x, so
+                # feed it the pre-margin x to avoid double-applying (sidebar offsets)
+                try:
+                    _rl_ml = self._len(self.style_for(it["child"], style).get("margin-left"), cb.w) or 0.0
+                except Exception:
+                    _rl_ml = 0.0
+                nb = self._layout_block(it["child"], style, cb.x - _rl_ml, cb.y, cb.w)
                 nb.x, nb.y = cb.x, cb.y
                 items[idx]["box"] = nb
                 box.children[box.children.index(cb)] = nb

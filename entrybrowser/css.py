@@ -377,6 +377,7 @@ def parse_selector(sel: str):
     We support: descendant (space), child (>), adjacent (+), general sibling (~).
     Output: list of (combinator, SimpleSel) with combinator of first = None."""
     out = []
+    sel = sel.replace("\\:", "_C_")  # escaped class-colon (Tailwind lg:) kept in-class
     sel = sel.replace("\\", "")  # unescape Tailwind arbitrary-value classes
     sel = re.sub(r"\s*>\s*", ">", sel.strip())
     sel = re.sub(r"\s*~\s*", "~", sel)
@@ -478,7 +479,11 @@ class Stylesheet:
             for i in idv.split(): out += b.get(("ID", i), [])
         cv = node.attrs.get("class")
         if cv:
-            for c in cv.split(): out += b.get(("CLASS", c), [])
+            for c in cv.split():
+                out += b.get(("CLASS", c), [])
+                # rule classes are stored with ":" escaped to _C_ (parse_selector)
+                if ":" in c:
+                    out += b.get(("CLASS", c.replace(":", "_C_")), [])
         return out
     @classmethod
     def parse(cls, css: str, viewport_w: float | None = None) -> "Stylesheet":
@@ -507,7 +512,25 @@ class Stylesheet:
                 if prop in _KNOWN or prop.startswith("-"):
                     decls[prop] = (val, important)
             sels = []
-            for s_ in sel_txt.split(","):
+            # escape/paren-aware selector-list split: Tailwind arbitrary classes
+            # carry commas inside \,-escaped class names — don't split those.
+            _sel_parts, _depth, _cur, _esc = [], 0, "", False
+            for _ch in sel_txt:
+                if _esc:
+                    _cur += _ch; _esc = False; continue
+                if _ch == "\\":
+                    _cur += _ch; _esc = True; continue
+                if _ch == "(":
+                    _depth += 1
+                elif _ch == ")":
+                    _depth = max(0, _depth - 1)
+                if _ch == "," and _depth == 0:
+                    _sel_parts.append(_cur); _cur = ""
+                else:
+                    _cur += _ch
+            if _cur.strip():
+                _sel_parts.append(_cur)
+            for s_ in _sel_parts:
                 c = parse_selector(s_)
                 if c: sels.append(c)
             if sels and decls:
@@ -680,7 +703,7 @@ class Stylesheet:
             for prop, (val, imp) in rule.decls.items():
                 style[prop] = val
         # var() substitution (CSS custom properties) — needed for Tailwind v4 etc.
-        if self.vars and style:
+        if style and any(isinstance(v, str) and "var(" in v for v in style.values()):
             import re as _re
             _varre = _re.compile(r"var\((--[\w-]+)(?:\s*,\s*([^()]*))?\)")
             def _sub(v, _depth=0):

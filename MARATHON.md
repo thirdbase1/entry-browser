@@ -281,3 +281,23 @@ Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.
   space at every depth. `global _LAYER_SHIFT` hoisted (SyntaxError fix).
 - Result: entry-agents.dev hero-mockup chat bubble + "Build the auth flow with
   GitHub OAuth" text renders. moz 0 text overlaps; EA 1; pxxl renders; 53/53.
+
+## Batch 28 — escaped selectors + var() fallbacks + flex item margins (2026-10-27)
+
+- **parse_selector escape handling**: `\:` → _C_ BEFORE backslash-strip so Tailwind
+  `lg:`/`hover:` classes parse (were returning None → entire lg: utility family
+  dropped). Selector-LIST splitting is now escape/paren-aware (commas inside
+  `ml-(--x,19rem)` classes no longer split rules).
+- **var() fallback-only substitution**: substitution previously gated on
+  `self.vars` non-empty — `var(--undefined,19rem)` never substituted. Gate now:
+  any style value contains var(. docs main ml → 304px.
+- **candidate_rules bucket mismatch**: rule classes stored _C_-normalized but
+  looked up raw → escaped-class rules never candidates. Lookup now tries both.
+- **Flex item margins**: margin-left advances cursor + caps item width (w-full
+  items no longer overflow container); margin-top on first/col items; re-lay pass
+  fed pre-margin x (double-apply fix — docs main child was at x=640 instead of 336).
+- **Fixed/absolute flex children out of flow**: laid at container origin, no cursor
+  consumption (docs sidebar nav renders; script/style/display:none skipped).
+- docs.pxxl.app: sidebar with full nav + main content x=320 w=960 right=1280,
+  max span 1004. Residuals: sidebar search/loading widgets stack words at one
+  position (site animation), minor H1 overlap. moz 0 overlaps; 53/53.
