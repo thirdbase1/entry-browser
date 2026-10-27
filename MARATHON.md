@@ -248,3 +248,25 @@ Receipts: mozosubz.xyz 7/10 (was 4), icons done; entry-agents.dev hero CLEAN (vi
   indexed empty sibling list on last-child (crashed after inline-flex change exposed
   it). Both branches now explicit guards.
 Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.
+
+## Batch 26 — `14324fc` (2026-10-27): pxxl/moz quality push (breakthroughs #17–#19)
+
+- **#17 flex anonymous text children**: flex containers DROPPED bare text children
+  (button `<a>What is Pxxl</a>` → h=2 empty). _layout_flex now wraps bare text into
+  anonymous inline via _layout_block. FAQ/labels across the web paint again.
+- **#18 linear-gradient painting**: Tailwind v4 `bg-gradient-to-br from-X to-Y`
+  emits `linear-gradient(var(--tw-gradient-stops))` where the via-stops var
+  substitutes to `var(--name,, C1 , C2)` — a var-wrapped fallback our var()
+  substitutor can't consume (balanced-paren fallback). _parse_linear_gradient in
+  css.py unwraps the fallback, splits top-level commas, converts stops via
+  parse_color (incl. lab/oklch → sRGB), returns (angle, [(color,pos)]); render.py
+  _paint_gradient renders the strip with rotation + rounded-corner mask.
+  mozosubz wallet card dark gradient now paints → white ₦24,580.00 visible.
+- **#19 flex container padding height**: `box.h = line_h` ignored own py-* padding →
+  hero CTA labels painted below the (too-short) bg rect → invisible white-on-white.
+  line_h += padding-top+bottom. "Create free account" legible (vision-confirmed).
+- Also: color-mix() in parse_color, list-style shorthand expansion + INHERITED type,
+  alpha bg blend (crop+alpha_composite), _paint_svg float() attr fixes.
+- pxxl.app pipeline: real fetch() via __pyFetch + virtual clock (Date.now/
+  performance.now advance with timer pump) — FAQ section now renders client-side.
+- Bench: example 28ms, HN 1.47s, python.org 319ms, wikipedia 1.29s, MDN 443ms. 53/53.
