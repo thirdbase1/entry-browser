@@ -206,3 +206,13 @@ system + pricing cards. pxxl.app = CSR JS shell (1 leaf, out of scope). bootstra
   site rendered in dark mode without JS. Light theme restored.
 Receipts: mozosubz.xyz overlaps 4->0; CNN 64->40; entry-agents.dev light theme coherent
 4/10 (residual: glyph-height overlap at leading-[1.03], demo-mockup internals).
+
+## Batch 22 — grid last-track stretch + max-width BEFORE children layout
+- Grid track stretch fix: last track stretched by cw - (sum(widths)+gaps), not
+  cw - sum(widths) — was double-adding the total gap (moz tiles 189/153 → equal 141).
+- ROOT FIX: max-width clamp moved BEFORE children layout in _layout_block (was after):
+  containers now lay grids/flex inside the CLAMPED content width. max-w-6xl 2-col grid
+  items were 600 (unclamped 1248 content) → 552 (clamped 1152). Closes the mozosubz
+  right-panel overflow; entry-agents.dev + all sites stable.
+- test_live_example_com: whitespace-normalize (example.com copy now wraps).
+Receipts: mozosubz.xyz 0 overlaps, tiles even, panels inside viewport; 53/53.

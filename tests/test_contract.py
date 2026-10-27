@@ -98,7 +98,8 @@ def test_text_extraction():
 def test_live_example_com():
     t = Tab(viewport_w=1024).load("https://example.com", is_url=True)
     assert t.status == 200
-    assert "documentation examples" in t.text()
+    import re as _re
+    assert "documentation examples" in _re.sub(r"\s+", " ", t.text())
 
 def test_cli_info():
     r = subprocess.run([sys.executable, "-m", "entrybrowser", "info", FIX],

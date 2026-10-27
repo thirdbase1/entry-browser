@@ -187,13 +187,31 @@ class Layout:
         content_x = box.x + ml + pl + bt
         content_y = y + pt + bt
         content_w = cw - ml - mr - pl - pr - 2*bt
+        box_outer_w = cw  # provisional; may be clamped below
         W = style.get("width")
         if W:
             wv = self._len(W, cw)
             if str(style.get("box-sizing", "content-box")) == "border-box":
                 content_w = max(0.0, wv - pl - pr - 2*bt)
+                box_outer_w = wv
             else:
                 content_w = wv
+                box_outer_w = wv + pl + pr + 2*bt
+        # max-width clamp BEFORE laying children so grids/flex size against the clamped
+        # content width (CSS: max-width constrains the box, content flows inside it)
+        MW_early = style.get("max-width")
+        if MW_early is not None and not isinstance(MW_early, str):
+            mwv = self._len(MW_early, cw)
+            if str(style.get("box-sizing", "content-box")) != "border-box":
+                mwv = mwv + pl + pr + 2*bt
+            if box_outer_w > mwv:
+                box_outer_w = mwv
+                content_w = max(0.0, mwv - ml - mr - pl - pr - 2*bt)
+                # auto-margin centering
+                ml_auto = (isinstance(style.get("margin-left"), str) and style["margin-left"] == "auto")
+                mr_auto = (isinstance(style.get("margin-right"), str) and style["margin-right"] == "auto")
+                if ml_auto and mr_auto:
+                    box.x += max(0.0, (cw - mwv) / 2)
         disp = self._display(style)
         if disp == "none" or style.get("visibility") == "hidden":
             box.w = box.h = 0
@@ -443,19 +461,14 @@ class Layout:
                 box.w = wv + pl + pr + 2*bt
         else:
             box.w = cw
-        # max-width clamp (+ auto-margin centering for blocks narrower than container)
-        MW = style.get("max-width")
-        if MW is not None and not isinstance(MW, str):
-            mwv = self._len(MW, cw)
+        # re-apply max-width clamp to final box.w (early clamp handled content_w)
+        MW_late = style.get("max-width")
+        if MW_late is not None and not isinstance(MW_late, str):
+            mwv2 = self._len(MW_late, cw)
             if str(style.get("box-sizing", "content-box")) != "border-box":
-                mwv = mwv + pl + pr + 2*bt
-            if box.w > mwv:
-                box.w = mwv
-                if W is None and style.get("margin-left") is None and style.get("margin-right") is None and style.get("margin-left") != 0:
-                    ml_auto = (isinstance(style.get("margin-left"), str) and style["margin-left"] == "auto")
-                    mr_auto = (isinstance(style.get("margin-right"), str) and style["margin-right"] == "auto")
-                    if ml_auto and mr_auto:
-                        box.x += (cw - box.w) / 2
+                mwv2 = mwv2 + pl + pr + 2*bt
+            if box.w > mwv2:
+                box.w = mwv2
         return box
 
     @staticmethod
@@ -810,8 +823,9 @@ class Layout:
                 widths.append(max(mn, nat if nat > 0 else max(mn, (cw - fixed) / max(1, ncol))))
             else:
                 widths.append(val)
-        if sum(widths) < cw:
-            widths[-1] += cw - sum(widths)  # stretch last track (1fr behavior if it was fr)
+        _sum_w = sum(widths) + gap * max(0, len(widths) - 1)
+        if _sum_w < cw:
+            widths[-1] += cw - _sum_w  # stretch last track (1fr behavior if it was fr)
         # build cell grid: named areas (grid-area: <name>) or source order
         # grid-column / grid-row: "N", "N / span M", "span M", "N / M" (CSS Grid §8)
         def _line_spec(v):
