@@ -167,3 +167,24 @@ Receipts: wikipedia 2/10 -> readable body + one-line title + images; HN 2/10 -> 
 - Receipts: Python wiki infobox table 844,336 with cells at 848 inside; article overlaps
   436 -> 412; p-p overlaps ZERO (remaining: td/th infobox internals, li column lists,
   hidden checkboxes); 53/53; all sites stable.
+
+## Batch 20 — Tailwind v4 support stack (breakthrough #15, user-requested site tests)
+User asked to test entry-agents.dev, pxxl.app, mozosubz.xyz. Findings + fixes:
+- @layer / @supports at-rules now recurse (Tailwind v4 CSS: 9 -> 577 rules parsed).
+- CSS custom properties: :root/:host vars captured; var() substitution in computed();
+  scoped vars (class-defined, e.g. .landing { --l-fg }) resolved via ancestor-class walk.
+- calc(len * num) evaluated in parse_length (h-16 = calc(var(--spacing)*16) -> 64px).
+- Logical shorthands padding-inline/padding-block -> physical sides; gap routed through
+  parse_length.
+- Tailwind arbitrary-value classes: selector class regex accepts [..], (..), escaped
+  backslashes stripped; ':' variant classes canonicalized (fixes hover: rules breaking).
+- Modern color syntax: rgb/hsl space-separated + slash alpha + %; oklch/oklab/lab ->
+  sRGB conversion; relative-color shapes guarded to None (no crash).
+- absolute/fixed left+right with width:auto now spans the interval (nav fixed left-0
+  right-0 went 112px -> full width).
+- parse_color None + parse_length_shorthand None guarded (no crashes on unsupported values).
+Receipts: entry-agents.dev overlaps 9 -> 10 w/ real styling (dark theme, cards, typography,
+buttons w/ backgrounds; hero region still broken: 1 -> 4/10). mozosubz.xyz CRASHED before
+(space-separated rgb) -> loads 4.6s, 159 leaves, 4 overlaps, 5/10 vision w/ full color
+system + pricing cards. pxxl.app = CSR JS shell (1 leaf, out of scope). bootstrap docs 7
+-> 4 overlaps. CNN 114 -> 64. 53/53 tests.

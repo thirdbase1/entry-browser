@@ -349,6 +349,11 @@ class Layout:
                         ty = _px(cstyle.get("top"), 0, ch_)
                         lx = _px(cstyle.get("left"), 0)
                         rx = _px(cstyle.get("right"), 0)
+                        # left+right both set with width:auto -> span the interval (CSS 10.3.7)
+                        if lx is not None and rx is not None and not cstyle.get("width"):
+                            _nw = cw - lx - rx
+                            if _nw > 40 and cb.w < _nw - 8:
+                                cb = self._layout_block(child, style, content_x + lx, cy, _nw)
                         ox, oy = cb.x, cb.y
                         dx, dy = 0, 0
                         if ty is not None: dy = box.y + ty - cb.y

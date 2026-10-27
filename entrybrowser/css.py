@@ -18,7 +18,7 @@ INHERITED = {
 _KNOWN = {
     "display","position","margin","margin-top","margin-right","margin-bottom","margin-left",
     "padding","padding-top","padding-right","padding-bottom","padding-left","aspect-ratio",
-    "clip","clip-path",
+    "clip","clip-path","padding-inline","padding-block",
     "border","border-width","border-style","border-color",
     "width","height","min-width","max-width","min-height","max-height",
     "background","background-color","background-image","background-size","color","font-family","font-size","font-weight",
@@ -44,10 +44,55 @@ _NAMED = {
     "whitesmoke":"#f5f5f5","gainsboro":"#dcdcdc","azure":"#f0ffff","beige":"#f5f5dc",
 }
 
+def _oklab_to_rgb(L, a, b):
+    """oklab (0..1 L) -> sRGB 0..255 tuple."""
+    l_ = L + 0.3963377774 * a + 0.2158037573 * b
+    m_ = L - 0.1055613458 * a - 0.0638541728 * b
+    s_ = L - 0.0894841775 * a - 1.2914855480 * b
+    l3, m3, s3 = l_**3, m_**3, s_**3
+    r = +4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3
+    g = -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3
+    bl = -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3
+    def _gamma(c):
+        c = max(0.0, min(1.0, c))
+        return 12.92*c if c <= 0.0031308 else 1.055*(c**(1/2.4)) - 0.055
+    return tuple(min(255, max(0, round(_gamma(x)*255))) for x in (r, g, bl))
+
 def parse_color(v: str) -> tuple[int,int,int,int] | None:
     v = v.strip().lower()
     if v in _NAMED:
         v = _NAMED[v]
+    # modern color functions: oklch(), oklab(), lab(), lch()
+    m = re.match(r"oklch\(\s*([\d.]+)%?\s+([\d.]+)\s+([\d.]+)", v)
+    if m:
+        L = float(m.group(1)) / 100 if float(m.group(1)) > 1 else float(m.group(1))
+        C, H = float(m.group(2)), float(m.group(3))
+        import math as _m
+        hr = _m.radians(H)
+        r, g, b = _oklab_to_rgb(L, C * _m.cos(hr), C * _m.sin(hr))
+        return (r, g, b, 255)
+    m = re.match(r"oklab\(\s*([\d.]+)%?\s+(-?[\d.]+)\s+(-?[\d.]+)", v)
+    if m:
+        L = float(m.group(1)) / 100 if float(m.group(1)) > 1 else float(m.group(1))
+        r, g, b = _oklab_to_rgb(L, float(m.group(2)), float(m.group(3)))
+        return (r, g, b, 255)
+    m = re.match(r"lab\(\s*([\d.]+)%?\s+(-?[\d.]+)\s+(-?[\d.]+)", v)
+    if m:
+        # lab -> xyz -> linear srgb (D65)
+        L, A, B = float(m.group(1)), float(m.group(2)), float(m.group(3))
+        fy = (L + 16) / 116
+        fx = fy + A / 500
+        fz = fy - B / 200
+        def _f(t):
+            return t**3 if t > 6/29 else 3*(6/29)**2*(t - 4/29)
+        X, Y, Z = _f(fx)*0.95047, _f(fy)*1.00000, _f(fz)*1.08883
+        rl, gl, bl = (3.2406*X - 1.5372*Y - 0.4986*Z,
+                      -0.9689*X + 1.8758*Y + 0.0415*Z,
+                      0.0557*X - 0.2040*Y + 1.0570*Z)
+        def _gamma(c):
+            c = max(0.0, min(1.0, c))
+            return 12.92*c if c <= 0.0031308 else 1.055*(c**(1/2.4)) - 0.055
+        return tuple(min(255, max(0, round(_gamma(x)*255))) for x in (rl, gl, bl)) + (255,)
     m = re.fullmatch(r"#([0-9a-f]{3})", v)
     if m:
         r,g,b = m.group(1); return (int(r*2,16), int(g*2,16), int(b*2,16), 255)
@@ -62,18 +107,41 @@ def parse_color(v: str) -> tuple[int,int,int,int] | None:
         h = m.group(1); return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16), int(h[6:8],16))
     m = re.fullmatch(r"rgba?\(([^)]+)\)", v)
     if m:
-        parts = [p.strip() for p in m.group(1).split(",")]
-        rgb = [int(float(p)) for p in parts[:3]]
-        a = float(parts[3]) if len(parts) > 3 else 1.0
-        return (rgb[0], rgb[1], rgb[2], int(a*255))
+        inner = m.group(1)
+        main, _, alpha_part = inner.partition("/")
+        toks = main.replace(",", " ").split()
+        nums = []
+        for p0 in toks[:3]:
+            p0 = p0.strip()
+            if p0.endswith("%"):
+                nums.append(int(round(float(p0[:-1]) * 2.55)))
+            else:
+                nums.append(int(float(p0)))
+        alpha = 1.0
+        alpha_part = alpha_part.strip()
+        if alpha_part:
+            alpha = float(alpha_part[:-1]) / 100 if alpha_part.endswith("%") else float(alpha_part)
+        elif len(toks) > 3:
+            a0 = toks[3].strip()
+            alpha = float(a0[:-1]) / 100 if a0.endswith("%") else float(a0)
+        if len(nums) < 3:
+            return None  # unsupported shape (relative color, var remnants...)
+        return (nums[0], nums[1], nums[2], int(alpha * 255))
     m = re.fullmatch(r"hsla?\(([^)]+)\)", v)
     if m:
-        parts = [p.strip() for p in m.group(1).replace("%","").split(",")]
-        h,s,l = float(parts[0]), float(parts[1])/100, float(parts[2])/100
+        inner = m.group(1)
+        main, _, alpha_part = inner.partition("/")
+        main = main.replace(",", " ").replace("%", "").split()
+        h, s0, l0 = float(main[0]), float(main[1])/100, float(main[2])/100
         import colorsys
-        r,g,b = colorsys.hls_to_rgb(h/360, l, s)
-        a = float(parts[3]) if len(parts) > 3 else 1.0
-        return (int(r*255), int(g*255), int(b*255), int(a*255))
+        r,g,b = colorsys.hls_to_rgb(h/360, l0, s0)
+        alpha = 1.0
+        alpha_part = alpha_part.strip()
+        if alpha_part:
+            alpha = float(alpha_part[:-1])/100 if alpha_part.endswith("%") else float(alpha_part)
+        elif len(main) > 3:
+            alpha = float(main[3])
+        return (int(r*255), int(g*255), int(b*255), int(alpha*255))
     return None
 
 LEN_RE = re.compile(r"^(-?[\d.]+)(px|pt|em|rem|%|vw|vh)?$")
@@ -82,6 +150,18 @@ def parse_length(v: str, em=16.0, base=16.0, total=None):
     """Return (value, unit) where value is a float; None for 'auto'."""
     v = v.strip()
     if v in ("auto", ""): return None
+    # calc() with a single multiplication: calc(<len> * <num>) or calc(<num> * <len>)
+    if v.startswith("calc(") and v.endswith(")"):
+        inner = v[5:-1].strip()
+        m2 = re.match(r"^([\d.]+)(px|rem|em)?\s*\*\s*([\d.]+)(px|rem|em)?$", inner)
+        if m2:
+            a, au, b, bu = m2.groups()
+            unit = au or bu or "px"
+            if au and bu:
+                return None  # length*length unsupported
+            v = str(float(a) * float(b)) + unit
+        else:
+            return None  # unsupported calc shape
     m = LEN_RE.match(v)
     if not m: return None
     val, unit = float(m.group(1)), m.group(2) or "px"
@@ -144,7 +224,7 @@ class SimpleSel:
             if not idv or not all(i in idv.split() for i in self.ids): return False
         if self.classes:
             cv = node.attr("class") or ""
-            classes = cv.split()
+            classes = [c.replace(":", "_C_") for c in cv.split()]
             if not all(c in classes for c in self.classes): return False
         if self.pseudo:
             p = self.pseudo
@@ -164,9 +244,9 @@ class SimpleSel:
 
 _SEL_PART = re.compile(
     r"(\*|[a-zA-Z][\w-]*)?"        # tag (\* = universal selector)
-    r"(?:\.([\w-]+))?"             # .class
+    r"(?:\.([\w\-\[\]%.,()/#!]+))?"   # .class (incl. Tailwind arbitrary values [..])
     r"(?:#([\w-]+))?"              # #id
-    r"(?::(hover|focus|active|first-child|last-child|checked|disabled))?"  # pseudo
+    r"(?::(hover|focus|active|first-child|last-child|checked|disabled|root))?"  # pseudo
 )
 
 def parse_selector(sel: str):
@@ -174,6 +254,7 @@ def parse_selector(sel: str):
     We support: descendant (space), child (>), adjacent (+), general sibling (~).
     Output: list of (combinator, SimpleSel) with combinator of first = None."""
     out = []
+    sel = sel.replace("\\", "")  # unescape Tailwind arbitrary-value classes
     sel = re.sub(r"\s*>\s*", ">", sel.strip())
     sel = re.sub(r"\s*~\s*", "~", sel)
     sel = re.sub(r"\s*\+\s*", "+", sel)
@@ -194,7 +275,7 @@ def parse_selector(sel: str):
         if s.tag == "*": s.tag = None   # universal: matches all, zero tag specificity
         # mark universal so specificity stays (0,0,0)
         if m.group(1) == "*": s._universal = True
-        if m.group(2): s.classes.append(m.group(2))
+        if m.group(2): s.classes.append(m.group(2).replace(":", "_C_"))
         if m.group(3): s.ids.append(m.group(3))
         if m.group(4): s.pseudo = m.group(4)
         out.append((comb, s))
@@ -254,6 +335,8 @@ class Stylesheet:
     def __init__(self):
         self.rules: list[Rule] = []
         self._buckets: dict[tuple, list[Rule]] = {}
+        self.vars: dict[str, str] = {}   # custom properties from :root/:host
+        self.class_vars: dict[str, dict[str, str]] = {}  # class -> {--prop: val}
     def _rebuild(self):
         self._buckets = {}
         for r in self.rules:
@@ -305,6 +388,22 @@ class Stylesheet:
                 c = parse_selector(s_)
                 if c: sels.append(c)
             if sels and decls:
+                # capture custom properties from :root/:host for var() substitution
+                _root_hit = False
+                for sel in sels:
+                    _last = sel[-1][1]
+                    if _last.classes and all(pk.startswith("--") for pk, _ in decls.items()):
+                        # scoped custom props (e.g. .landing { --l-fg: ... })
+                        for cname in _last.classes:
+                            ss.class_vars.setdefault(cname, {}).update(
+                                {pk: pv for pk, (pv, _pi) in decls.items()})
+                    if ((_last.tag in ("root", "host") or _last.pseudo == "root")
+                            and not _last.classes and not _last.ids):
+                        _root_hit = True
+                if _root_hit:
+                    for pk, (pv, _pi) in decls.items():
+                        if pk.startswith("--"):
+                            ss.vars[pk] = pv
                 ss.rules.append(Rule(sels, decls, order)); order += 1
 
         def _walk(css_text, media_ok=True, _depth=0):
@@ -328,8 +427,15 @@ class Stylesheet:
                     cond = sel[6:].strip()
                     ok = media_ok and _media_ok(cond, viewport_w)
                     _walk(body, ok, _depth + 1)
+                elif sel.startswith("@layer"):
+                    # @layer groups are transparent — recurse into the body
+                    _walk(body, media_ok, _depth + 1)
+                elif sel.startswith("@supports"):
+                    # conservative: assume condition holds (fallback blocks duplicate
+                    # base rules) and recurse
+                    _walk(body, media_ok, _depth + 1)
                 elif sel.startswith("@"):
-                    pass  # skip other at-rules
+                    pass  # skip other at-rules (@property, @font-face, @keyframes...)
                 else:
                     if "{" in body:
                         # shouldn't happen for plain rules; recurse defensively
@@ -434,6 +540,36 @@ class Stylesheet:
         for spec, order, rule in sorted(matched, key=lambda t: (0 if not any(imp for _, imp in t[2].decls.values()) else 1, t[0], t[1])):
             for prop, (val, imp) in rule.decls.items():
                 style[prop] = val
+        # var() substitution (CSS custom properties) — needed for Tailwind v4 etc.
+        if self.vars and style:
+            import re as _re
+            _varre = _re.compile(r"var\((--[\w-]+)(?:\s*,\s*([^()]*))?\)")
+            def _sub(v, _depth=0):
+                if not isinstance(v, str) or "var(" not in v or _depth > 8:
+                    return v
+                def _rep(m2):
+                    name, fb = m2.group(1), (m2.group(2) or "")
+                    rep = self.vars.get(name)
+                    if rep is None:
+                        # scoped custom props: nearest ancestor (by class) that defines it
+                        q2 = node
+                        hops = 0
+                        while q2 is not None and hops < 32:
+                            cv = (q2.attrs.get("class") or "").split() if q2 is not None else []
+                            for cname in reversed(cv):
+                                d2 = self.class_vars.get(cname) or {}
+                                if name in d2:
+                                    rep = d2[name]; break
+                            if rep is not None: break
+                            q2 = getattr(q2, "parent", None)
+                            hops += 1
+                    if rep is None:
+                        return fb.strip() or ""
+                    return rep
+                return _sub(_varre.sub(_rep, v), _depth + 1)
+            for k in list(style.keys()):
+                if isinstance(style[k], str) and "var(" in style[k]:
+                    style[k] = _sub(style[k])
         return self._resolve(style, em)
     def _resolve(self, style, em):
         """Turn raw strings into typed values where layout needs them."""
@@ -445,13 +581,23 @@ class Stylesheet:
         for k in ("margin","padding"):
             if isinstance(s.get(k), str):
                 m = parse_length_shorthand(s[k], em=em)
-                s[k] = m
-                if k == "margin":
+                if m is not None:
+                    s[k] = m
+                    pre = "margin" if k == "margin" else "padding"
                     for side in "top right bottom left".split():
-                        s[f"margin-{side}"] = m[side]
+                        s[f"{pre}-{side}"] = m[side]
                 else:
-                    for side in "top right bottom left".split():
-                        s[f"padding-{side}"] = m[side]
+                    s[k] = None  # unparseable shorthand (var remnants etc.)
+        # logical shorthands (Tailwind v4 px-*/py-*)
+        for k0, tgt in (("padding-inline", ("padding-left","padding-right")),
+                        ("padding-block", ("padding-top","padding-bottom"))):
+            v0 = s.get(k0)
+            if isinstance(v0, str):
+                lv = parse_length(v0, em=em)
+                if lv is not None:
+                    for t2 in tgt: s[t2] = lv
+        if isinstance(s.get("gap"), str):
+            s["gap"] = parse_length(s["gap"], em=em)
         # side longhands may arrive as raw strings (inline styles, presentational hints)
         for k in list(s.keys()):
             for pre in ("margin-","padding-"):
@@ -478,7 +624,7 @@ class Stylesheet:
             if isinstance(s.get(deco_key), str) and s[deco_key] in ("inherit","initial"):
                 s[deco_key] = None
         if isinstance(s.get("background-color"), str):
-            s["background-color"] = parse_color(s["background-color"])
+            s["background-color"] = parse_color(s["background-color"]) or None
         return s
 
 DEFAULT_STYLE = {
