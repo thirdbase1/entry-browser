@@ -238,3 +238,13 @@ Receipts: mozosubz.xyz 0 overlaps, tiles even, panels inside viewport; 53/53.
   + checkmarks render (vision-confirmed).
 Receipts: mozosubz.xyz 7/10 (was 4), icons done; entry-agents.dev hero CLEAN (vision:
 "no glyph collision"). 53/53.
+
+## Batch 25 — inline-flex goes through the flex path + :last-child empty-sibling guard
+- display:inline-flex now dispatched to _layout_flex (was falling into inline text
+  layout): the logo svg + wordmark overlapped because text ignored the svg's 20px.
+  Now svg x=40, text x=68 (gap-2 honored). Wikipedia overlaps 434 -> 342 (header
+  inline-flex elements across the board).
+- :first-child/:last-child precedence bug — `(not sibs or ...) if fc else sibs[-1]...`
+  indexed empty sibling list on last-child (crashed after inline-flex change exposed
+  it). Both branches now explicit guards.
+Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.

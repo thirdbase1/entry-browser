@@ -217,7 +217,7 @@ class Layout:
             box.w = box.h = 0
             return box
         # flex row container?
-        if style.get("display") == "flex":
+        if style.get("display") in ("flex", "inline-flex"):
             self._layout_flex(node, box, style, content_x, content_y, content_w)
         elif style.get("display") == "grid":
             self._layout_grid(node, box, style, content_x, content_y, content_w)

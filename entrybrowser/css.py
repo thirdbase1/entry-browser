@@ -241,9 +241,8 @@ class SimpleSel:
             if p in ("first-child", "last-child"):
                 par = node.parent
                 sibs = [c for c in (par.children if par else []) if c.tag != "#text"]
-                if not sibs or sibs[0] is not node if p == "first-child" else sibs[-1] is not node:
-                    if p == "first-child" and (not sibs or sibs[0] is not node): return False
-                    if p == "last-child" and (not sibs or sibs[-1] is not node): return False
+                if p == "first-child" and (not sibs or sibs[0] is not node): return False
+                if p == "last-child" and (not sibs or sibs[-1] is not node): return False
         return True
 
 _SEL_PART = re.compile(
