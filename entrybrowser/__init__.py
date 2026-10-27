@@ -63,9 +63,9 @@ class Tab:
             self.title = self.js.title or (t_after[0].text_content().strip() if t_after else self.title)
         t2 = time.perf_counter()
         css_bits = []
-        if css_text: css_bits.append(css_text)
+        if css_text: css_bits.append((css_text, self.final_url or ""))
         for st in self.doc.query_all("style"):
-            css_bits.append(st.text)
+            css_bits.append((st.text, self.final_url or ""))
         for link in self.doc.query_all("link"):
             rel = (link.attr("rel") or "").lower()
             href = link.attr("href")
@@ -74,11 +74,11 @@ class Tab:
                 if url and url.startswith("http"):
                     try:
                         t, _, s = net.fetch(url)
-                        if s == 200: css_bits.append(t)
+                        if s == 200: css_bits.append((t, url))
                     except Exception:
                         pass
         self._ext_css_bits = list(css_bits)   # kept for _relayout
-        self.stylesheet = Stylesheet.parse("\n".join(css_bits), viewport_w=self.viewport_w) if css_bits else None
+        self.stylesheet = Stylesheet.parse(css_bits, viewport_w=self.viewport_w) if css_bits else None
         self.timings["parse_css"] = time.perf_counter() - t2
         t3 = time.perf_counter()
         self.layout = Layout(self.doc, self.stylesheet, viewport_w=self.viewport_w, base_url=self.final_url or "")
@@ -282,10 +282,10 @@ class Tab:
         Keeps externally-fetched stylesheet text; re-parses inline <style> only."""
         from .css import Stylesheet
         t2 = time.perf_counter()
-        css_bits = self._ext_css_bits[:]   # cached external sheets from initial load
+        css_bits = self._ext_css_bits[:]   # cached (text, base) pairs from initial load
         for st in self.doc.query_all("style"):
-            css_bits.append(st.text)
-        self.stylesheet = Stylesheet.parse("\n".join(css_bits), viewport_w=self.viewport_w) if css_bits else None
+            css_bits.append((st.text, self.final_url or ""))
+        self.stylesheet = Stylesheet.parse(css_bits, viewport_w=self.viewport_w) if css_bits else None
         from .layout import Layout
         self.layout = Layout(self.doc, self.stylesheet, viewport_w=self.viewport_w, base_url=self.final_url or "")
         self.root_box = self.layout.build()

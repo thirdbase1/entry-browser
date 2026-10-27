@@ -536,24 +536,66 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box, _top=True):
     if box.spans:
         from PIL import ImageFont
         cache = {}
-        for text, tx, baseline, fpath, size, color, underline, sup, *rest in box.spans:
-            ls = rest[1] if len(rest) > 1 and isinstance(rest[1], (int, float)) else 0.0
+        _gfonts = {}
+        def _font_for(fpath, size):
             key = (fpath, int(round(size)))
             if key not in cache:
                 try:
                     cache[key] = ImageFont.truetype(fpath, int(round(size)))
                 except Exception:
                     cache[key] = ImageFont.load_default()
-            font = cache[key]
-            if ls:
-                cx2 = tx
-                for ch in text:
-                    d.text((cx2, baseline), ch, font=font, fill=tuple(color if color else (0,0,0,255)))
-                    cx2 += font.getlength(ch) + ls
-                tw = cx2 - tx
-            else:
-                d.text((tx, baseline), text, font=font, fill=tuple(color if color else (0,0,0,255)))
-                tw = font.getlength(text)
+            return cache[key]
+        def _glyph_font(ch, fpath, size):
+            """Per-character fallback: webfont first, system DejaVu if glyph missing."""
+            f = _font_for(fpath, size)
+            ck = (ch, fpath, int(round(size)))
+            if ck in _gfonts: return _gfonts[ck]
+            ok = True
+            try:
+                m = getattr(f, "getmask", None)
+                from fontTools.ttLib import TTFont as _TTF
+                if fpath not in _gfonts.get("_cmaps", {}):
+                    _gfonts.setdefault("_cmaps", {})[fpath] = _TTF(fpath).getBestCmap()
+                cm = _gfonts["_cmaps"][fpath]
+                ok = ord(ch) in cm
+            except Exception:
+                ok = True
+            if ok or ch in " \u00a0":
+                _gfonts[ck] = f
+                return f
+            for fb in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                       "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"):
+                try:
+                    ff = ImageFont.truetype(fb, int(round(size)))
+                    _gfonts[ck] = ff
+                    return ff
+                except Exception:
+                    pass
+            _gfonts[ck] = f
+            return f
+        for text, tx, baseline, fpath, size, color, underline, sup, *rest in box.spans:
+            ls = rest[1] if len(rest) > 1 and isinstance(rest[1], (int, float)) else 0.0
+            # split text into runs by per-glyph font coverage
+            runs = []
+            cur_ch = None; cur_buf = ""
+            for ch in text:
+                f = _glyph_font(ch, fpath, size)
+                if cur_ch is None or f is cur_ch:
+                    cur_ch = f; cur_buf += ch
+                else:
+                    runs.append((cur_buf, cur_ch)); cur_ch = f; cur_buf = ch
+            if cur_buf: runs.append((cur_buf, cur_ch))
+            tw = 0.0
+            for rtext, rfont in runs:
+                cx2 = tx + tw
+                if ls:
+                    for ch in rtext:
+                        d.text((cx2, baseline), ch, font=rfont, fill=tuple(color if color else (0,0,0,255)))
+                        cx2 += rfont.getlength(ch) + ls
+                    tw += cx2 - (tx + tw)
+                else:
+                    d.text((cx2, baseline), rtext, font=rfont, fill=tuple(color if color else (0,0,0,255)))
+                    tw += rfont.getlength(rtext)
             if underline:
                 ly = baseline + size * 0.18
                 d.line([tx, ly, tx + tw, ly], fill=tuple(color if color else (0,0,0,255)), width=max(1, int(size/16)))

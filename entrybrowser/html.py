@@ -169,6 +169,8 @@ def parse(html: str) -> Node:
                     del stack[k:]
                     break
         if start_name in ("html","head"):
+            if start_name == "html" and attrs:
+                html_n.attrs.update(attrs)
             continue
         if start_name == "body":
             # move to body if not already
@@ -176,6 +178,8 @@ def parse(html: str) -> Node:
                 stack.pop()
             if stack[-1] is not body:
                 stack.append(body)
+            if attrs:
+                body.attrs.update(attrs)
             continue
         if start_name in VOID:
             node = Node(start_name, attrs)

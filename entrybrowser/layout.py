@@ -33,8 +33,35 @@ FONT_ITALIC = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf"
 FONT_BOLDITALIC = "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf"
 FONT_MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 
+ACTIVE_FACES: list = []   # set per-Layout from stylesheet.font_faces
+ACTIVE_BASE: str = ""
+
 def _find_font(family: str, bold=False, italic=False) -> str:
     import os
+    if ACTIVE_FACES and family:
+        toks = [t.strip().strip("\"'").lower() for t in str(family).split(",")]
+        toks = [t for t in toks if t and t not in ("inherit", "sans-serif", "serif", "monospace")]
+        def _covers_latin(path):
+            try:
+                from fontTools.ttLib import TTFont
+                cmap = TTFont(path).getBestCmap()
+                return all(ord(c) in cmap for c in "aAzZ09")
+            except Exception:
+                return False
+        for tok in toks:
+            fam_faces = [f for f in ACTIVE_FACES
+                         if str(f.get("family", "")).strip().lower() == tok]
+            got = []
+            for face in fam_faces:
+                p = _webfont_path(face, ACTIVE_BASE, bold, italic)
+                if p:
+                    got.append(p)
+            # prefer a subset that actually covers basic latin
+            for p in got:
+                if _covers_latin(p):
+                    return p
+            if got:
+                return got[0]
     want_mono = family and "mono" in family.lower()
     want_serif = family and "serif" in family.lower() and "sans" not in family.lower()
     if want_serif:
@@ -60,6 +87,81 @@ def _find_font(family: str, bold=False, italic=False) -> str:
     g = glob.glob("/usr/share/fonts/**/*.ttf", recursive=True)
     return g[0] if g else ""
 
+_WEBFONT_CACHE: dict[str, str] = {}   # url -> local ttf path
+
+def _webfont_path(face: dict, base_url: str, bold: bool, italic: bool) -> str | None:
+    """Download + convert a registered @font-face to a local TTF. Returns path or None."""
+    import os, urllib.request
+    try:
+        w = 700 if bold else 400
+        fw = face.get("weight") or "400"
+        parts = str(fw).split()
+        try:
+            fw_lo = int(parts[0])
+        except Exception:
+            fw_lo = 400
+        is_variable = len(parts) >= 2   # e.g. "100 900" variable range covers all
+        fs = (face.get("style") or "normal").lower()
+        if not is_variable and (fw_lo >= 600) != bold:
+            return None           # weight mismatch: let fallback family handle it
+        if (fs.startswith("ital") or fs == "oblique") != italic:
+            return None
+        from urllib.parse import urljoin
+        raw = face["url"]
+        cands = [raw] if raw.startswith("http") else [urljoin(base_url, raw)]
+        for b in face.get("bases") or []:
+            u2 = urljoin(b, raw)
+            if u2 not in cands: cands.append(u2)
+            # Next.js bundles: @font-face src ../media/... lives in /_next/static/media/
+            if "/media/" in u2:
+                u3 = u2.replace("/static/immutable/media/", "/static/media/").replace("/static/chunks/media/", "/static/media/")
+                if u3 not in cands: cands.append(u3)
+        url = cands[0]
+        face["_cands"] = cands
+    except Exception:
+        return None
+    if face["url"] in _WEBFONT_CACHE:
+        return _WEBFONT_CACHE[face["url"]] or None
+    import tempfile
+    os.makedirs("/tmp/entryfonts", exist_ok=True)
+    data = None
+    last_err = None
+    for url in face.get("_cands") or [url]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            d2 = urllib.request.urlopen(req, timeout=15).read()
+            if d2[:4] not in (b"wOF2", b"wOFF", b"\x00\x01\x00\x00", b"OTTO", b"true"):
+                continue
+            data = d2
+            break
+        except Exception as e:
+            last_err = e
+    if data is None:
+        _WEBFONT_CACHE[face["url"]] = ""
+        return None
+    # validate font magic — SPA fallbacks serve 200 HTML pages
+    if not data[:4] in (b"wOF2", b"wOFF", b"\x00\x01\x00\x00", b"OTTO", b"true"):
+        _WEBFONT_CACHE[face["url"]] = ""
+        return None
+    try:
+        raw = "/tmp/entryfonts/" + (url.rsplit("/", 1)[-1].split("?")[0] or "f") 
+        if not raw.endswith((".woff2", ".woff", ".ttf", ".otf")):
+            raw += ".woff2"
+        open(raw, "wb").write(data)
+        if raw.endswith((".woff2", ".woff")):
+            from fontTools.ttLib import TTFont
+            f = TTFont(raw)
+            f.flavor = None
+            out = raw.rsplit(".", 1)[0] + ".ttf"
+            f.save(out)
+        else:
+            out = raw
+        _WEBFONT_CACHE[face["url"]] = out
+        return out
+    except Exception:
+        _WEBFONT_CACHE[face["url"]] = ""
+        return None
+
 class Layout:
     def __init__(self, doc: Node, stylesheet: Stylesheet | None = None,
                  viewport_w=800.0, base_url=""):
@@ -72,6 +174,9 @@ class Layout:
         self._font_cache: dict[tuple, object] = {}
         self._measure_cache: dict[tuple, float] = {}
         self._floats: list = []   # active float boxes (cleared per block context; approximate)
+        global ACTIVE_FACES, ACTIVE_BASE
+        ACTIVE_FACES = list(getattr(stylesheet, "font_faces", []) or []) if stylesheet else []
+        ACTIVE_BASE = base_url or ""
     def _font(self, family, size, bold=False, italic=False):
         from PIL import ImageFont
         key = (family, round(size), bold, italic)

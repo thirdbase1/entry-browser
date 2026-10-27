@@ -461,6 +461,7 @@ class Stylesheet:
         self._buckets: dict[tuple, list[Rule]] = {}
         self.vars: dict[str, str] = {}   # custom properties from :root/:host
         self.class_vars: dict[str, dict[str, str]] = {}  # class -> {--prop: val}
+        self.font_faces: list[dict] = []   # @font-face captures {family,url,weight,style}
     def _rebuild(self):
         self._buckets = {}
         for r in self.rules:
@@ -486,8 +487,11 @@ class Stylesheet:
                     out += b.get(("CLASS", c.replace(":", "_C_")), [])
         return out
     @classmethod
-    def parse(cls, css: str, viewport_w: float | None = None) -> "Stylesheet":
+    def parse(cls, css, viewport_w: float | None = None) -> "Stylesheet":
         ss = cls()
+        ss.font_faces = []
+        _bits = css if isinstance(css, list) else [(css, "")]
+        css = "\n".join(t for t, _b in _bits)
         css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
         order = 0
 
@@ -581,8 +585,22 @@ class Stylesheet:
                     # conservative: assume condition holds (fallback blocks duplicate
                     # base rules) and recurse
                     _walk(body, media_ok, _depth + 1)
+                elif sel.startswith("@font-face"):
+                    if media_ok:
+                        ff_fam = re.search(r"font-family\s*:\s*([^;}]+)", body)
+                        ff_src = re.search(r"""url\(\s*['"]?([^'")]+)""", body)
+                        ff_w = re.search(r"font-weight\s*:\s*([^;}]+)", body)
+                        ff_st = re.search(r"font-style\s*:\s*([^;}]+)", body)
+                        if ff_fam and ff_src:
+                            ss.font_faces.append({
+                                "family": ff_fam.group(1).strip().strip("\"'"),
+                                "url": ff_src.group(1).strip(),
+                                "bases": [b for _t, b in _bits if b],
+                                "weight": (ff_w.group(1).strip() if ff_w else "400"),
+                                "style": (ff_st.group(1).strip() if ff_st else "normal"),
+                            })
                 elif sel.startswith("@"):
-                    pass  # skip other at-rules (@property, @font-face, @keyframes...)
+                    pass  # skip other at-rules (@property, @keyframes...)
                 else:
                     if "{" in body:
                         # shouldn't happen for plain rules; recurse defensively

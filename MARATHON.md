@@ -301,3 +301,27 @@ Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.
 - docs.pxxl.app: sidebar with full nav + main content x=320 w=960 right=1280,
   max span 1004. Residuals: sidebar search/loading widgets stack words at one
   position (site animation), minor H1 overlap. moz 0 overlaps; 53/53.
+
+
+## Batch 29 — real webfonts (@font-face) + per-glyph fallback (2026-10-28)
+
+- **Parser bug (huge): <html>/<body> attributes were DISCARDED** — the start-tag
+  branch parsed attrs then `continue`d to pre-created nodes, dropping class/style/
+  lang on every html+body tag. Broke class-scoped CSS vars, body font vars, Tailwind
+  variable-font classes site-wide. Fixed: merge attrs into html_n/body.
+- **@font-face support**: css.py captures font-face blocks (family/url/weight/style,
+  candidate base URLs from each stylesheet bit — parse now accepts (text, base)
+  pairs); layout.py downloads (UA header), validates font magic (SPA-fallback HTML
+  pages served 200 were being "converted"), converts woff2→ttf via fontTools,
+  caches at /tmp/entryfonts. Variable-font weight ranges ("100 900") match both
+  bold and regular.
+- **Subset selection**: Next/Google faces are unicode-range subsets; the tiny
+  40-glyph subset was being chosen → site-wide tofu. _find_font now tries every
+  family-matching face and prefers one whose cmap covers aAzZ09 (225-glyph latin).
+- **Per-glyph fallback in render**: span text split into runs by cmap coverage;
+  glyphs missing from the webfont (₦ U+20A6) fall back to DejaVu per character.
+  mozosubz naira renders everywhere; vision: 9/10 "zero tofu".
+- Cache-key bug: _WEBFONT_CACHE stored under loop-var URL, looked up under
+  face["url"] → every span re-downloaded (multi-second loads). Normalized.
+- EA vision 10/10 with Geist ("no tofu"); EA overlaps 4→2 (residual = grid-row
+  badge spacing, cosmetic). moz 0 overlaps. Bench/example unaffected. 53/53.
