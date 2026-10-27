@@ -11,7 +11,7 @@ import re
 INHERITED = {
     "color","font-family","font-size","font-weight","font-style","line-height",
     "text-align","text-decoration","letter-spacing","text-transform",
-    "white-space","visibility","cursor",
+    "white-space","visibility","cursor","list-style-type",
 }
 
 # property names we understand (everything else parses but is ignored)
@@ -58,10 +58,130 @@ def _oklab_to_rgb(L, a, b):
         return 12.92*c if c <= 0.0031308 else 1.055*(c**(1/2.4)) - 0.055
     return tuple(min(255, max(0, round(_gamma(x)*255))) for x in (r, g, bl))
 
+def _parse_linear_gradient(value):
+    """Parse linear-gradient(<dir>, stop, stop, ...) -> (angle_rad|None, [(color, pos)]).
+    Handles 'to bottom right in oklab', 'to bottom', degrees; stops are colors with
+    optional % positions. Returns None when unparseable."""
+    try:
+        import re as _re
+        value = value.strip()
+        # unresolved var(--name,, fallback) wrappers: the fallback (balanced) is the
+        # real stop list - Tailwind v4 emits this when --tw-gradient-via-stops is
+        # substituted with an empty value first.
+        while True:
+            vm = _re.search(r"var\(--[\w-]+,", value)
+            if not vm:
+                break
+            i0 = vm.end()
+            if value[i0:i0+1] == ",":
+                i0 += 1
+            depth2 = 1
+            j2 = i0
+            while j2 < len(value) and depth2 > 0:
+                if value[j2] == "(": depth2 += 1
+                elif value[j2] == ")": depth2 -= 1
+                j2 += 1
+            inner = value[i0:j2-1].strip()
+            value = value[:vm.start()] + inner + value[j2:]
+        m = _re.match(r"\s*linear-gradient\((.*)\)\s*$", value, _re.S)
+        if not m:
+            return None
+        # split top-level commas
+        parts, depth, cur = [], 0, ""
+        for ch in m.group(1):
+            if ch == "(": depth += 1
+            elif ch == ")": depth -= 1
+            if ch == "," and depth == 0:
+                parts.append(cur.strip()); cur = ""
+            else:
+                cur += ch
+        if cur.strip(): parts.append(cur.strip())
+        if not parts:
+            return None
+        import math
+        angle = None  # radians of gradient direction vector
+        p0 = parts[0]
+        dirmap = {"to top": 270, "to bottom": 90, "to left": 180, "to right": 0,
+                  "to top right": 315, "to bottom right": 135,
+                  "to bottom left": 225, "to top left": 45}
+        rest = parts
+        if p0.startswith("to ") or p0.endswith(("deg", "turn", "rad", "grad")) or _re.match(r"^-?[\d.]+", p0):
+            # direction may carry 'in oklab' suffix
+            d = _re.split(r"\s+in\s+\w+$", p0)[0].strip()
+            if d in dirmap:
+                angle = math.radians(dirmap[d])
+            else:
+                dm = _re.match(r"^(-?[\d.]+)(deg|turn|rad|grad)?", d)
+                if dm:
+                    v = float(dm.group(1))
+                    u = dm.group(2) or "deg"
+                    v = {"deg": v, "turn": v * 360, "rad": math.degrees(v), "grad": v * 0.9}[u]
+                    angle = math.radians(v % 360)
+            rest = parts[1:]
+        stops = []
+        for part in rest:
+            part = part.strip()
+            if not part:
+                continue
+            pm = _re.match(r"^(.*?)(?:\s+([\d.]+)%)?\s*$", part, _re.S)
+            col_txt, pos = pm.group(1).strip(), pm.group(2)
+            col = parse_color(col_txt)
+            if col is None:
+                continue
+            stops.append((col, float(pos) / 100.0 if pos is not None else None))
+        if not stops:
+            return None
+        # fill unspecified positions evenly
+        n = len(stops)
+        for idx2 in range(n):
+            if stops[idx2][1] is None:
+                stops[idx2] = (stops[idx2][0], idx2 / max(n - 1, 1))
+        return (angle, stops)
+    except Exception:
+        return None
+
+
 def parse_color(v: str) -> tuple[int,int,int,int] | None:
     v = v.strip().lower()
     if v in _NAMED:
         v = _NAMED[v]
+    # color-mix(in <space>, C1 [P%], C2 [Q%]) — alpha-weighted channel mix
+    if v.startswith("color-mix(") and v.endswith(")"):
+        try:
+            inner = v[len("color-mix("):-1]
+            parts = [p.strip() for p in inner.split(",") if p.strip()]
+            # parts[0] = "in oklab" etc — ignore interpolation space
+            def _comp(tok):
+                tok = tok.strip()
+                pct = 50.0
+                pm = re.match(r"([\s\S]+?)\s+(\d+(?:\.\d+)?)%$", tok)
+                if pm:
+                    tok, pct = pm.group(1).strip(), float(pm.group(2))
+                c = parse_color(tok) if tok != "transparent" else (0, 0, 0, 0)
+                if c is None:
+                    return None
+                return c, pct / 100.0
+            a = _comp(parts[1]) if len(parts) > 2 else None
+            b = _comp(parts[2]) if len(parts) > 2 else None
+            if a is None or b is None:
+                return None
+            (c1, w1), (c2, w2) = a, b
+            if w1 == 0.5 and w2 == 0.5:
+                w1 = w2 = 0.5
+            total = w1 + w2
+            if total <= 0:
+                return (0, 0, 0, 0)
+            w1 /= total; w2 /= total
+            # premultiplied-alpha mixing (spec behavior)
+            out = []
+            for ch in range(3):
+                out.append(int(round(c1[ch] * w1 * (c1[3] / 255.0) + c2[ch] * w2 * (c2[3] / 255.0))))
+            alpha = c1[3] * w1 + c2[3] * w2
+            if alpha > 0:
+                out = [int(round(o / (alpha / 255.0))) for o in out]
+            return (max(0, min(255, out[0])), max(0, min(255, out[1])), max(0, min(255, out[2])), max(0, min(255, int(round(alpha)))))
+        except Exception:
+            return None
     # modern color functions: oklch(), oklab(), lab(), lch()
     m = re.match(r"oklch\(\s*([\d.]+)%?\s+([\d.]+)\s+([\d.]+)", v)
     if m:
@@ -632,8 +752,42 @@ class Stylesheet:
                         s[k] = parse_length(s[k], em=em)
                     except Exception:
                         pass
+        # gradient images: linear-gradient(...) -> typed tuple for the painter
+        _bgi = s.get("background-image")
+        if isinstance(_bgi, str) and "linear-gradient" in _bgi:
+            _grad = _parse_linear_gradient(_bgi)
+            if _grad is not None:
+                s["background-image"] = _grad
+        if isinstance(s.get("background"), str) and "linear-gradient" in s["background"]:
+            _grad2 = _parse_linear_gradient(s["background"])
+            if _grad2 is not None:
+                s["background-image"] = _grad2
+
+# background shorthand: color part -> background-color (inline styles land here)
+        if isinstance(s.get("background"), str):
+            _bgv = s["background"].strip()
+            if _bgv and not _bgv.startswith(("url(", "linear-gradient", "radial-gradient")):
+                try:
+                    _bgc = parse_color(_bgv)
+                    if _bgc is not None and s.get("background-color") in (None, "transparent"):
+                        s["background-color"] = _bgc
+                except Exception:
+                    pass
         if isinstance(s.get("border"), str):
             s["border"] = expand_border(s["border"])
+        # list-style shorthand: first non-position/non-image token is the type
+        if isinstance(s.get("list-style"), str):
+            _lsv = s["list-style"].strip().lower()
+            if _lsv == "none":
+                s["list-style-type"] = "none"
+            else:
+                for _tok in _lsv.split():
+                    if _tok in ("inside", "outside"):
+                        continue
+                    if _tok.startswith(("url(", '"', "'")):
+                        continue
+                    s["list-style-type"] = _tok
+                    break
         for k in ("font-size","line-height","letter-spacing"):
             if isinstance(s.get(k), str):
                 L = parse_length(s[k], em=em)

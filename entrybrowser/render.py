@@ -130,6 +130,13 @@ def _paint_transformed(img, box):
 _PAINT_DRAW = [None]
 
 
+
+def _svg_f(v, default=0.0):
+    try:
+        return float(str(v).replace("%", "").strip())
+    except Exception:
+        return default
+
 def _paint_svg(img, d, box):
     """Minimal inline-SVG painter: rect/circle/ellipse/line/polyline/polygon/path
     (M L H V C S Q T Z absolute+relative), stroke=currentColor / fill, viewBox scaling."""
@@ -172,8 +179,8 @@ def _paint_svg(img, d, box):
             fill = col(root_fill, None) if root_fill else None
             st_ = None
             if tag == "rect":
-                x, y = float(a.get("x", 0)), float(a.get("y", 0))
-                w2, h2 = float(a.get("width", 0)), float(a.get("height", 0))
+                x, y = _svg_f(a.get("x", 0)), _svg_f(a.get("y", 0))
+                w2, h2 = _svg_f(a.get("width", 0)), _svg_f(a.get("height", 0))
                 rx = float(a.get("rx", 0) or 0)
                 p1, p2 = T(x, y), T(x + w2, y + h2)
                 st_ = [p1, p2]
@@ -184,12 +191,12 @@ def _paint_svg(img, d, box):
                     if rx: d.rounded_rectangle([p1[0], p1[1], p2[0], p2[1]], radius=rx*min(sx,sy), fill=fill)
                     else: d.rectangle([p1[0], p1[1], p2[0], p2[1]], fill=fill)
             elif tag == "circle":
-                cx, cy, r = float(a.get("cx", 0)), float(a.get("cy", 0)), float(a.get("r", 0))
+                cx, cy, r = _svg_f(a.get("cx", 0)), _svg_f(a.get("cy", 0)), _svg_f(a.get("r", 0))
                 p1, p2 = T(cx - r, cy - r), T(cx + r, cy + r)
                 if fill: d.ellipse([p1[0], p1[1], p2[0], p2[1]], fill=fill)
                 elif stroke: d.ellipse([p1[0], p1[1], p2[0], p2[1]], outline=stroke, width=max(1, int(sw*min(sx,sy))))
             elif tag == "line":
-                p1, p2 = T(float(a.get("x1", 0)), float(a.get("y1", 0))), T(float(a.get("x2", 0)), float(a.get("y2", 0)))
+                p1, p2 = T(_svg_f(a.get("x1", 0)), _svg_f(a.get("y1", 0))), T(_svg_f(a.get("x2", 0)), _svg_f(a.get("y2", 0)))
                 if stroke: d.line([p1[0], p1[1], p2[0], p2[1]], fill=stroke, width=max(1, int(sw*min(sx,sy))))
             elif tag in ("polyline", "polygon"):
                 pts = a.get("points", "").replace(",", " ").split()
@@ -280,6 +287,61 @@ def _paint_svg_path(d, dd, T, stroke, width, fill=None):
                 d.line(flat, fill=stroke, width=width, joint="curve")
 
 
+def _paint_gradient(img, box, grad):
+    """Paint a linear-gradient tuple (angle, [(color, pos), ...]) over the box area."""
+    from PIL import Image as _PILImage
+    import math as _math
+    angle, stops = grad
+    x0, y0 = max(0, int(box.x)), max(0, int(box.y))
+    x1, y1 = int(box.x + box.w), int(box.y + box.h)
+    if x1 <= x0 or y1 <= y0:
+        return
+    w, h = x1 - x0, y1 - y0
+    # projection axis: unit vector along gradient direction; default to bottom (90deg)
+    if angle is None:
+        ux, uy = 0.0, 1.0
+    else:
+        ux, uy = _math.cos(angle), _math.sin(angle)
+    # gradient line length through the box (CSS formula approximation)
+    glen = abs(w * ux) + abs(h * uy)
+    if glen <= 0:
+        return
+    stops = sorted(stops, key=lambda s2: s2[1])
+    if stops[0][1] > 0:
+        stops.insert(0, (stops[0][0], 0.0))
+    if stops[-1][1] < 1:
+        stops.append((stops[-1][0], 1.0))
+    # build a 1D gradient strip then scale — cheap and smooth
+    strip = _PILImage.new("RGB", (int(glen) or 1, 1))
+    px = strip.load()
+    si = 0
+    for i2 in range(strip.size[0]):
+        t = i2 / max(strip.size[0] - 1, 1)
+        while si < len(stops) - 2 and t > stops[si + 1][1]:
+            si += 1
+        c0, p0 = stops[si]; c1, p1 = stops[min(si + 1, len(stops) - 1)]
+        span = (p1 - p0) or 1.0
+        f = max(0.0, min(1.0, (t - p0) / span))
+        px[i2, 0] = (int(c0[0] + (c1[0] - c0[0]) * f),
+                     int(c0[1] + (c1[1] - c0[1]) * f),
+                     int(c0[2] + (c1[2] - c0[2]) * f))
+    # orient strip along direction: rotate the strip then crop center
+    deg = _math.degrees(_math.atan2(uy, ux))
+    diag = int(_math.hypot(w, h)) + 2
+    big = strip.resize((diag, 1)).rotate(-deg, expand=True)
+    bw, bh = big.size
+    cx, cy = (bw - w) // 2, (bh - h) // 2
+    patch = big.convert("RGB").crop((cx, cy, cx + w, cy + h))
+    if getattr(box, "radius", 0) and box.radius > 0:
+        mask = _PILImage.new("L", (w, h), 0)
+        from PIL import ImageDraw as _ID
+        _ID.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius=box.radius, fill=255)
+        img.paste(patch, (x0, y0), mask)
+    else:
+        img.paste(patch, (x0, y0))
+    return
+
+
 def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box, _top=True):
     if _top and _LAYER_SHIFT:
         import copy as _copy
@@ -301,6 +363,14 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box, _top=True):
         return
     if _paint_svg(img, d, box):
         return
+    # linear-gradient background-image (typed tuple from css._parse_linear_gradient)
+    _bgi = box.style.get("background-image")
+    if isinstance(_bgi, tuple) and _bgi and box.w > 0 and box.h > 0:
+        try:
+            _paint_gradient(img, box, _bgi)
+        except Exception as _ge:
+            import sys as _sys
+            print("gradient fail:", _ge, file=_sys.stderr)
     if box.bg and box.w > 0 and box.h > 0 and not (len(box.bg) == 4 and box.bg[3] == 0):
         col = tuple(box.bg) if len(box.bg) == 4 else (*box.bg, 255)
         try:
@@ -311,10 +381,27 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box, _top=True):
         x0, y0 = max(0, int(box.x)), max(0, int(box.y))
         x1, y1 = int(box.x + box.w), int(box.y + box.h)
         if x1 > x0 and y1 > y0:
-            if box.radius and box.radius > 0:
-                d.rounded_rectangle([x0, y0, x1, y1], radius=box.radius, fill=col)
-            else:
-                d.rectangle([x0, y0, x1, y1], fill=col)
+            # RGBA on an RGB base ignores alpha in PIL — pre-blend against the base
+            if len(col) == 4 and col[3] < 255:
+                try:
+                    from PIL import Image as _PILImage
+                    Image = _PILImage
+                    _crop = img.crop((x0, y0, x1, y1)).convert("RGBA")
+                    _ov = Image.new("RGBA", _crop.size, col)
+                    # blend color channel-wise against base RGB, keep base alpha
+                    _b = Image.alpha_composite(_crop, _ov)
+                    _out = Image.merge("RGBA", (*_b.split()[0:3], _crop.split()[3]))
+                    img.paste(_out, (x0, y0))
+                    col = None
+                except Exception as _be:
+                    import sys as _sys
+                    print("BG-blend fail:", _be, file=_sys.stderr)
+                    col = (*col[:3],)
+            if col is not None:
+                if box.radius and box.radius > 0:
+                    d.rounded_rectangle([x0, y0, x1, y1], radius=box.radius, fill=col)
+                else:
+                    d.rectangle([x0, y0, x1, y1], fill=col)
     if box.bg_img and box.w > 2 and box.h > 2:
         try:
             from PIL import Image as _PILImage
@@ -402,26 +489,44 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box, _top=True):
             d.polygon([(ax, ay-2), (ax+8, ay-2), (ax+4, ay+3)], fill=(60,60,60,255))
     # list bullets / numbers
     if box.node is not None and box.node.tag == "li":
+        _ls_skip = False
         try:
-            from .layout import Layout as _L
+            _ls = str(box.style.get("list-style-type") or "").strip().lower()
+            if _ls == "none":
+                _ls_skip = True
+            else:
+                _p = box.node.parent
+                # parent li boxes carry the ul/ol list-style — check nearest ul/ol
+                # ancestor's computed style via the layout cache on its box
+                while _p is not None and _p.tag not in ("ul", "ol"):
+                    _p = _p.parent
+                if _p is not None and getattr(_p, "_box", None) is not None:
+                    _pls = str(_p._box.style.get("list-style-type") or "").strip().lower()
+                    if _pls == "none":
+                        _ls_skip = True
         except Exception:
-            pass
-        parent = box.node.parent
-        # find our index among li siblings
-        idx = 0
-        if parent is not None:
-            for c in parent.children:
-                if c.tag == "li":
-                    idx += 1
-                if c is box.node:
-                    break
-        marker = f"{idx}."
-        lt = (parent.attrs.get("type") if parent is not None else None)
-        ul = parent is not None and parent.tag == "ul"
-        color = box.style.get("color") or (0,0,0,255)
-        mx = max(0.0, box.x - 14)
-        d.text((mx, (box.text_lines[0][2] if box.text_lines else box.y + 14)),
-               "•" if ul else marker, font=_small_font(), fill=tuple(color))
+            _ls_skip = False
+        if not _ls_skip:
+            try:
+                from .layout import Layout as _L
+            except Exception:
+                pass
+            parent = box.node.parent
+            # find our index among li siblings
+            idx = 0
+            if parent is not None:
+                for c in parent.children:
+                    if c.tag == "li":
+                        idx += 1
+                    if c is box.node:
+                        break
+            marker = f"{idx}."
+            lt = (parent.attrs.get("type") if parent is not None else None)
+            ul = parent is not None and parent.tag == "ul"
+            color = box.style.get("color") or (0,0,0,255)
+            mx = max(0.0, box.x - 14)
+            d.text((mx, (box.text_lines[0][2] if box.text_lines else box.y + 14)),
+                   "•" if ul else marker, font=_small_font(), fill=tuple(color))
     if box.spans:
         from PIL import ImageFont
         cache = {}

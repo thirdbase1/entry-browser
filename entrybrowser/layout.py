@@ -213,7 +213,7 @@ class Layout:
                 if ml_auto and mr_auto:
                     box.x += max(0.0, (cw - mwv) / 2)
         disp = self._display(style)
-        if disp == "none" or style.get("visibility") == "hidden":
+        if disp == "none" or style.get("visibility") == "hidden" or node.tag == "template":
             box.w = box.h = 0
             return box
         # flex row container?
@@ -228,7 +228,7 @@ class Layout:
             cy = content_y
             inline_run = []
             for child in node.children:
-                if child.tag in ("style","script","title","head","meta","link"):
+                if child.tag in ("style","script","title","head","meta","link","template"):
                     continue
                 if child.tag == "#text":
                     if child.text.strip(): inline_run.append(child)
@@ -508,6 +508,13 @@ class Layout:
                         except Exception: pass
                     c0 = _ik[0]
             if c0.tag != "#text" or c0.text.strip():
+                if c0.tag == "#text":
+                    # anonymous inline: wrap bare text in a span so the flex item
+                    # gets laid out with its text lines (CSS anonymous box)
+                    _span = Node("span", {}, parent=c0.parent)
+                    _span.children = [c0]
+                    c0.parent = _span
+                    c0 = _span
                 raw_items.append(c0)
         # measure natural sizes — shrink-to-fit (max-content capped at container)
         def _max_content_w(b):
@@ -642,6 +649,15 @@ class Layout:
         # align-items cross-axis
         if not col:
             line_h = max(i["box"].h for i in items)
+            # flex container's own vertical padding wraps the line (buttons with
+            # py-* collapsed to bare text height otherwise)
+            _pt = style.get("padding-top"); _pb = style.get("padding-bottom")
+            try:
+                _ptv = self._len(_pt, cw) if _pt is not None and not isinstance(_pt, (int, float)) else (_pt or 0)
+                _pbv = self._len(_pb, cw) if _pb is not None and not isinstance(_pb, (int, float)) else (_pb or 0)
+                line_h += float(_ptv or 0) + float(_pbv or 0)
+            except Exception:
+                pass
             for cb in placed:
                 if ai == "center": cb.y += max(0, (line_h-cb.h)/2)
                 elif ai == "flex-end": cb.y += max(0, line_h-cb.h)
