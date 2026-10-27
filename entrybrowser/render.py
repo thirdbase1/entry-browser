@@ -68,6 +68,7 @@ def _shift_pt(x, y):
     return x, y
 
 def _paint(img, d: ImageDraw.ImageDraw, box: Box):
+    global _LAYER_SHIFT
     tr = getattr(box, "transform", None)
     if tr and (tr[0] or tr[1] or tr[2] or tr[3] != 1.0):
         _paint_transformed(img, box)
@@ -76,13 +77,18 @@ def _paint(img, d: ImageDraw.ImageDraw, box: Box):
     if ovf == "hidden" and box.children:
         # paint into clipped layer
         try:
-            x0, y0 = max(0, int(box.x)), max(0, int(box.y))
-            x1, y1 = int(box.x + box.w), int(box.y + box.h)
+            # crop coords must be in the CURRENT surface's space: when painting into
+            # a parent layer, absolute coords were shifted — apply the same shift.
+            _bx, _by = box.x, box.y
+            if _LAYER_SHIFT:
+                _dx, _dy = _LAYER_SHIFT[-1]
+                _bx, _by = _bx + _dx, _by + _dy
+            x0, y0 = max(0, int(_bx)), max(0, int(_by))
+            x1, y1 = int(_bx + box.w), int(_by + box.h)
             if x1 > x0 and y1 > y0 and x1 <= img.width and y1 <= img.height:
                 layer = img.crop((x0, y0, x1, y1))
                 ld = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).Draw(layer)
                 # paint children with coordinates translated into layer space
-                global _LAYER_SHIFT
                 _LAYER_SHIFT.append((-x0, -y0))
                 try:
                     _paint_plain(layer, ld, box)
@@ -343,7 +349,7 @@ def _paint_gradient(img, box, grad):
 
 
 def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box, _top=True):
-    if _top and _LAYER_SHIFT:
+    if _LAYER_SHIFT:
         import copy as _copy
         box = _copy.copy(box)
         dx, dy = _LAYER_SHIFT[-1]
