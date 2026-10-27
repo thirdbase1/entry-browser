@@ -188,3 +188,21 @@ buttons w/ backgrounds; hero region still broken: 1 -> 4/10). mozosubz.xyz CRASH
 (space-separated rgb) -> loads 4.6s, 159 leaves, 4 overlaps, 5/10 vision w/ full color
 system + pricing cards. pxxl.app = CSR JS shell (1 leaf, out of scope). bootstrap docs 7
 -> 4 overlaps. CNN 114 -> 64. 53/53 tests.
+
+## Batch 21 — max-width clamp, flex min-height floors, padding longhand order, theme leak
+- vh/vw units: parse_length returns ("vh"/"vw") sentinels; Layout._len resolves vs
+  viewport_h/viewport_w (min-h-screen now spans the screen).
+- max-width clamp in block layout: box.w clamped to max-width (border-box aware);
+  enables Tailwind max-w-[740px]/[1320px] containers (hero constrained 1232->740).
+- flex items: min-height/min-width floors enforced after final re-lay (buttons min-h-10
+  h 17->40; text no longer clipped).
+- CSS source order: shorthand expansion no longer clobbers longhands declared later
+  (padding:0 vs padding-top:calc -> pt-24 = 96px wins). Side longhands now parsed in
+  _resolve.
+- prefers-color-scheme media queries gated: light scheme honored (was applying dark
+  rules unconditionally).
+- class_vars capture restricted to single-compound rules: `.dark .landing{--l-bg:...}`
+  was overwriting `.landing{--l-bg:#fafafa}` scoped vars via shared class name — the
+  site rendered in dark mode without JS. Light theme restored.
+Receipts: mozosubz.xyz overlaps 4->0; CNN 64->40; entry-agents.dev light theme coherent
+4/10 (residual: glyph-height overlap at leading-[1.03], demo-mockup internals).

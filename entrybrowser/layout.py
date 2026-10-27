@@ -66,6 +66,8 @@ class Layout:
         self.doc = doc
         self.ss = stylesheet
         self.vw = viewport_w
+        self.viewport_w = viewport_w
+        self.viewport_h = 800.0   # vh unit baseline (window height approximation)
         self.base_url = base_url
         self._font_cache: dict[tuple, object] = {}
         self._measure_cache: dict[tuple, float] = {}
@@ -441,6 +443,19 @@ class Layout:
                 box.w = wv + pl + pr + 2*bt
         else:
             box.w = cw
+        # max-width clamp (+ auto-margin centering for blocks narrower than container)
+        MW = style.get("max-width")
+        if MW is not None and not isinstance(MW, str):
+            mwv = self._len(MW, cw)
+            if str(style.get("box-sizing", "content-box")) != "border-box":
+                mwv = mwv + pl + pr + 2*bt
+            if box.w > mwv:
+                box.w = mwv
+                if W is None and style.get("margin-left") is None and style.get("margin-right") is None and style.get("margin-left") != 0:
+                    ml_auto = (isinstance(style.get("margin-left"), str) and style["margin-left"] == "auto")
+                    mr_auto = (isinstance(style.get("margin-right"), str) and style["margin-right"] == "auto")
+                    if ml_auto and mr_auto:
+                        box.x += (cw - box.w) / 2
         return box
 
     @staticmethod
@@ -591,6 +606,18 @@ class Layout:
                 nb.x, nb.y = cb.x, cb.y
                 items[idx]["box"] = nb
                 box.children[box.children.index(cb)] = nb
+        # min-height / min-width floors on flex items (buttons, pills, cards)
+        for it in items:
+            cb = it["box"]
+            cstyle = cb.style or {}
+            for axis in ("h", "w"):
+                mk = "min-height" if axis == "h" else "min-width"
+                mv = cstyle.get(mk)
+                if mv is None or isinstance(mv, str): continue
+                mvv = self._len(mv, cb.w if axis == "h" else cw)
+                if mvv > 0 and getattr(cb, axis) < mvv:
+                    setattr(cb, axis, mvv)
+                    pass
         if not col and jc in ("center","flex-end","space-between") and not wrap:
             total = sum(i["box"].w for i in items) + gap*(n-1 if n else 0)
             if jc == "center": dx = max(0, (cw-total)/2)
@@ -1324,5 +1351,7 @@ class Layout:
         if isinstance(v, (int, float)): return float(v)
         if isinstance(v, tuple):
             if v[0] == "pct": return v[1]/100*cw
+            if v[0] == "vh": return v[1]/100 * getattr(self, "viewport_h", cw)
+            if v[0] == "vw": return v[1]/100 * getattr(self, "viewport_w", cw)
             return v[0]
         return 0.0

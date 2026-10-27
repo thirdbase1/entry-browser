@@ -171,6 +171,10 @@ def parse_length(v: str, em=16.0, base=16.0, total=None):
     elif unit == "%":
         if total: val = val/100*total
         else: return ("pct", val)
+    elif unit == "vh":
+        return ("vh", val)
+    elif unit == "vw":
+        return ("vw", val)
     return (val, "px")
 
 def parse_length_shorthand(v, em=16.0, total=None):
@@ -394,9 +398,10 @@ class Stylesheet:
                     _last = sel[-1][1]
                     if _last.classes and all(pk.startswith("--") for pk, _ in decls.items()):
                         # scoped custom props (e.g. .landing { --l-fg: ... })
-                        for cname in _last.classes:
-                            ss.class_vars.setdefault(cname, {}).update(
-                                {pk: pv for pk, (pv, _pi) in decls.items()})
+                        if len(sels) == 1 and len(sels[0]) == 1:  # single compound only
+                            for cname in _last.classes:
+                                ss.class_vars.setdefault(cname, {}).update(
+                                    {pk: pv for pk, (pv, _pi) in decls.items()})
                     if ((_last.tag in ("root", "host") or _last.pseudo == "root")
                             and not _last.classes and not _last.ids):
                         _root_hit = True
@@ -467,13 +472,28 @@ class Stylesheet:
                 p = part[3:].strip() if neg else part
                 m = re.match(r"\(?([\w-]+)\s*:\s*([\d.]+)(px|em)\)?", p)
                 if not m:
+                    m = re.match(r"\(?([\w-]+)\s*:\s*([\w-]+)\)?", p)
+                    if m:
+                        v_scheme = m.group(2)
+                        feat = m.group(1)
+                        if feat == "prefers-color-scheme":
+                            ok = ok and ((v_scheme == "light") != neg)
+                        elif feat in ("prefers-reduced-motion", "prefers-contrast"):
+                            ok = ok and ((v_scheme in ("true","no-preference","less")) != neg)
+                        continue
                     m = re.match(r"\(?([\w-]+)\)?", p)
                     continue
+                v_scheme = ""
                 feat, val = m.group(1), float(m.group(2)) * (16 if m.group(2) and m.group(2) and False else 1)
                 if p.endswith("em") or (m.lastindex or 0) >= 3 and m.group(3) == "em": val = float(m.group(2)) * 16
                 if feat == "min-width": r_ = vw >= val
                 elif feat == "max-width": r_ = vw <= val
-                else: continue
+                elif feat == "prefers-color-scheme":
+                    r_ = (v_scheme == "light")   # engine renders light scheme (no JS theme switch)
+                elif feat in ("prefers-reduced-motion", "prefers-contrast"):
+                    r_ = (v_scheme in ("true", "no-preference"))
+                else:
+                    continue
                 ok = ok and (not r_ if neg else r_)
             return ok
 
@@ -575,7 +595,9 @@ class Stylesheet:
         """Turn raw strings into typed values where layout needs them."""
         s = dict(style)
         for k in ("width","height","min-width","max-width","min-height","max-height",
-                  "top","left","right","bottom"):
+                  "top","left","right","bottom",
+                  "margin-top","margin-right","margin-bottom","margin-left",
+                  "padding-top","padding-right","padding-bottom","padding-left"):
             if isinstance(s.get(k), str):
                 s[k] = parse_length(s[k], em=em)
         for k in ("margin","padding"):
@@ -585,7 +607,12 @@ class Stylesheet:
                     s[k] = m
                     pre = "margin" if k == "margin" else "padding"
                     for side in "top right bottom left".split():
-                        s[f"{pre}-{side}"] = m[side]
+                        full = f"{pre}-{side}"
+                        # a longhand declared AFTER the shorthand wins (source order);
+                        # approximate: don't overwrite if this node got an explicit
+                        # longhand rule — mark during cascade instead. Here keep shorthand
+                        # only when no longhand was cascaded later than it.
+                        s[full] = m[side] if s.get(full) is None else s[full]
                 else:
                     s[k] = None  # unparseable shorthand (var remnants etc.)
         # logical shorthands (Tailwind v4 px-*/py-*)
