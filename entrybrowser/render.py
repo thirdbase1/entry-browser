@@ -38,6 +38,35 @@ def _small_font():
             _SF = ImageFont.load_default()
     return _SF
 
+
+def _paint_layer_children(layer, ld, box, x0, y0):
+    """Paint child boxes into a clipped layer, translating absolute coords."""
+    dx, dy = -x0, -y0
+    import copy
+    for c in box.children:
+        try:
+            c2 = copy.copy(c)
+            c2.x = c.x + dx; c2.y = c.y + dy
+            if getattr(c, "spans", None):
+                c2.spans = []
+                for sp in c.spans:
+                    sp2 = list(sp)
+                    sp2[1] = sp[1] + dx   # tx
+                    sp2[2] = sp[2] + dy   # baseline
+                    c2.spans.append(tuple(sp2))
+            c2.children = c.children  # nested handled by _paint recursion with shift?
+            _paint(layer, ld, c2)
+        except Exception:
+            pass
+
+_LAYER_SHIFT = []  # (dx,dy) applied to all absolute coords painted into clipped layers
+
+def _shift_pt(x, y):
+    if _LAYER_SHIFT:
+        dx, dy = _LAYER_SHIFT[-1]
+        return x + dx, y + dy
+    return x, y
+
 def _paint(img, d: ImageDraw.ImageDraw, box: Box):
     tr = getattr(box, "transform", None)
     if tr and (tr[0] or tr[1] or tr[2] or tr[3] != 1.0):
@@ -52,12 +81,18 @@ def _paint(img, d: ImageDraw.ImageDraw, box: Box):
             if x1 > x0 and y1 > y0 and x1 <= img.width and y1 <= img.height:
                 layer = img.crop((x0, y0, x1, y1))
                 ld = __import__("PIL.ImageDraw", fromlist=["ImageDraw"]).Draw(layer)
-                _paint_plain(layer, ld, box)
+                # paint children with coordinates translated into layer space
+                global _LAYER_SHIFT
+                _LAYER_SHIFT.append((-x0, -y0))
+                try:
+                    _paint_plain(layer, ld, box)
+                finally:
+                    _LAYER_SHIFT.pop()
                 img.paste(layer, (x0, y0))
                 return
         except Exception:
             pass
-    _paint_plain(img, d, box)
+    _paint_plain(img, d, box, _top=False)
 
 def _paint_transformed(img, box):
     """Render a transformed box (translate/rotate/scale) into an offscreen layer."""
@@ -94,7 +129,165 @@ def _paint_transformed(img, box):
 
 _PAINT_DRAW = [None]
 
-def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box):
+
+def _paint_svg(img, d, box):
+    """Minimal inline-SVG painter: rect/circle/ellipse/line/polyline/polygon/path
+    (M L H V C S Q T Z absolute+relative), stroke=currentColor / fill, viewBox scaling."""
+    node = box.node
+    if node is None or node.tag != "svg" or box.w <= 0 or box.h <= 0:
+        return False
+    st = box.style or {}
+    color = st.get("color") or (0, 0, 0, 255)
+    if isinstance(color, tuple) and len(color) == 4:
+        cur = color
+    else:
+        cur = (0, 0, 0, 255)
+    stroke_w = st.get("stroke-width") or 2
+    try: stroke_w = float(stroke_w)
+    except (TypeError, ValueError): stroke_w = 2.0
+    try:
+        vb = (node.attrs.get("viewBox") or "").replace(",", " ").split()
+        vbx, vby, vbw, vbh = (float(vb[0]), float(vb[1]), float(vb[2]), float(vb[3])) if len(vb) == 4 else (0, 0, float(node.attrs.get("width", box.w)), float(node.attrs.get("height", box.h)))
+    except (ValueError, IndexError):
+        vbx, vby, vbw, vbh = 0, 0, box.w, box.h
+    if vbw <= 0 or vbh <= 0: return True
+    sx = box.w / vbw; sy = box.h / vbh
+    def T(x, y): return (box.x + (x - vbx) * sx, box.y + (y - vby) * sy)
+    def col(v, default):
+        if v in (None, "none", "transparent"): return None
+        if v == "currentColor": return tuple(cur)
+        from .css import parse_color as _pc
+        c = _pc(v)
+        return tuple(c) if c else default
+    def walk_children(n):
+        for c in n.children:
+            tag = c.tag
+            a = c.attrs
+            sw = a.get("stroke-width")
+            try: sw = float(sw) if sw is not None else stroke_w
+            except ValueError: sw = stroke_w
+            stroke = col(a.get("stroke"), None) if a.get("stroke") else (tuple(cur) if a.get("fill") is None and a.get("stroke") != "none" else None)
+            # lucide convention: fill=none stroke=currentColor on the svg root; shapes inherit
+            root_fill = a.get("fill")
+            fill = col(root_fill, None) if root_fill else None
+            st_ = None
+            if tag == "rect":
+                x, y = float(a.get("x", 0)), float(a.get("y", 0))
+                w2, h2 = float(a.get("width", 0)), float(a.get("height", 0))
+                rx = float(a.get("rx", 0) or 0)
+                p1, p2 = T(x, y), T(x + w2, y + h2)
+                st_ = [p1, p2]
+                if stroke and fill is None:
+                    if rx: d.rounded_rectangle([p1[0], p1[1], p2[0], p2[1]], radius=rx*min(sx,sy), outline=stroke, width=max(1, int(sw*min(sx,sy))))
+                    else: d.rectangle([p1[0], p1[1], p2[0], p2[1]], outline=stroke, width=max(1, int(sw*min(sx,sy))))
+                elif fill:
+                    if rx: d.rounded_rectangle([p1[0], p1[1], p2[0], p2[1]], radius=rx*min(sx,sy), fill=fill)
+                    else: d.rectangle([p1[0], p1[1], p2[0], p2[1]], fill=fill)
+            elif tag == "circle":
+                cx, cy, r = float(a.get("cx", 0)), float(a.get("cy", 0)), float(a.get("r", 0))
+                p1, p2 = T(cx - r, cy - r), T(cx + r, cy + r)
+                if fill: d.ellipse([p1[0], p1[1], p2[0], p2[1]], fill=fill)
+                elif stroke: d.ellipse([p1[0], p1[1], p2[0], p2[1]], outline=stroke, width=max(1, int(sw*min(sx,sy))))
+            elif tag == "line":
+                p1, p2 = T(float(a.get("x1", 0)), float(a.get("y1", 0))), T(float(a.get("x2", 0)), float(a.get("y2", 0)))
+                if stroke: d.line([p1[0], p1[1], p2[0], p2[1]], fill=stroke, width=max(1, int(sw*min(sx,sy))))
+            elif tag in ("polyline", "polygon"):
+                pts = a.get("points", "").replace(",", " ").split()
+                xy = [T(float(pts[i]), float(pts[i+1])) for i in range(0, len(pts) - 1, 2)]
+                if xy:
+                    if tag == "polygon" and fill: d.polygon(xy, fill=fill)
+                    elif stroke: d.line([c2 for p2 in xy for c2 in p2], fill=stroke, width=max(1, int(sw*min(sx,sy))), joint="curve")
+            elif tag == "path" and a.get("d"):
+                _paint_svg_path(d, a["d"], T, stroke or tuple(cur), max(1, int(sw*min(sx,sy))), fill)
+            walk_children(c)
+    walk_children(node)
+    return True
+
+def _paint_svg_path(d, dd, T, stroke, width, fill=None):
+    """Path: M/m L/l H/h V/v C/c S/s Q/q T/t A(->line)/Z/z."""
+    import re as _re
+    for _ in range(4):
+        dd = _re.sub(r"(\d)\.(\d+)\.(\d)", r"\1.\2 \3", dd)  # compact "4.5.5" => "4.5 .5"
+    toks = _re.findall(r"([MLHVCSQTAZmlhvcsqtaz])([^MLHVCSQTAZmlhvcsqtaz]*)", dd)
+    def nums(s2):
+        out = []
+        for m3 in _re.finditer(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?", s2):
+            try: out.append(float(m3.group(0)))
+            except ValueError: pass
+        return out
+    cx = cy = 0.0; sxp = syp = 0.0
+    pts = []
+    subs = []
+    for cmd, arg in toks:
+        v = nums(arg)
+        if cmd in "Mm":
+            if pts: subs.append(pts); pts = []
+            for i in range(0, len(v) - 1, 2):
+                if cmd == "M": cx, cy = v[i], v[i+1]
+                else: cx, cy = cx + v[i], cy + v[i+1]
+                pts.append(T(cx, cy)); sxp, syp = cx, cy
+        elif cmd in "Ll":
+            for i in range(0, len(v) - 1, 2):
+                if cmd == "L": cx, cy = v[i], v[i+1]
+                else: cx, cy = cx + v[i], cy + v[i+1]
+                pts.append(T(cx, cy))
+        elif cmd in "Hh":
+            for x2 in v:
+                cx = x2 if cmd == "H" else cx + x2
+                pts.append(T(cx, cy))
+        elif cmd in "Vv":
+            for y2 in v:
+                cy = y2 if cmd == "V" else cy + y2
+                pts.append(T(cx, cy))
+        elif cmd in "CcSsQqTt":
+            # cubic/quadratic: sample control polygon
+            if cmd in "Cc":
+                for i in range(0, len(v) - 5, 6):
+                    x1, y1, x2, y2, x3, y3 = (v[i:i+6] if cmd == "C" else
+                        [cx+v[i], cy+v[i+1], cx+v[i+2], cy+v[i+3], cx+v[i+4], cy+v[i+5]])
+                    for k in range(1, 9):
+                        tt = k / 8
+                        mx_ = (1-tt)**3*cx + 3*(1-tt)**2*tt*x1 + 3*(1-tt)*tt*tt*x2 + tt**3*x3
+                        my_ = (1-tt)**3*cy + 3*(1-tt)**2*tt*y1 + 3*(1-tt)*tt*tt*y2 + tt**3*y3
+                        pts.append(T(mx_, my_))
+                    cx, cy = x3, y3
+            else:
+                for i in range(0, len(v) - 3, 4):
+                    x1, y1, x2, y2 = (v[i:i+4] if cmd == "Q" else
+                        [cx+v[i], cy+v[i+1], cx+v[i+2], cy+v[i+3]])
+                    for k in range(1, 9):
+                        tt = k / 8
+                        mx_ = (1-tt)**2*cx + 2*(1-tt)*tt*x1 + tt**2*x2
+                        my_ = (1-tt)**2*cy + 2*(1-tt)*tt*y1 + tt**2*y2
+                        pts.append(T(mx_, my_))
+                    cx, cy = x2, y2
+        elif cmd in "Zz":
+            if pts: pts.append(pts[0])
+        elif cmd in "Aa":
+            # arc: approximate with line to end point
+            for i in range(0, len(v) - 6, 7):
+                if cmd == "A": cx, cy = v[i+5], v[i+6]
+                else: cx, cy = cx + v[i+5], cy + v[i+6]
+                pts.append(T(cx, cy))
+        if cmd in "Mm": pass
+    if pts: subs.append(pts)
+    for pts2 in subs:
+        if len(pts2) >= 2:
+            flat = [c2 for p2 in pts2 for c2 in p2]
+            if fill is not None and len(pts2) >= 3:
+                d.polygon(pts2, fill=fill, outline=stroke)
+            else:
+                d.line(flat, fill=stroke, width=width, joint="curve")
+
+
+def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box, _top=True):
+    if _top and _LAYER_SHIFT:
+        import copy as _copy
+        box = _copy.copy(box)
+        dx, dy = _LAYER_SHIFT[-1]
+        box.x += dx; box.y += dy
+        if getattr(box, "spans", None):
+            box.spans = [tuple([sp[0], sp[1]+dx, sp[2]+dy] + list(sp[3:])) for sp in box.spans]
     # opacity:0 boxes are fully invisible (common for CSS checkbox hacks) — skip painting
     try:
         if float(box.style.get("opacity", 1) or 1) <= 0 and not (box.children or getattr(box, "spans", None)):
@@ -105,6 +298,8 @@ def _paint_plain(img, d: ImageDraw.ImageDraw, box: Box):
     _cp = str(box.style.get("clip-path") or "")
     _cl = str(box.style.get("clip") or "")
     if "inset(50%" in _cp or _cl.replace(" ", "").startswith("rect(0,0,0,0"):
+        return
+    if _paint_svg(img, d, box):
         return
     if box.bg and box.w > 0 and box.h > 0 and not (len(box.bg) == 4 and box.bg[3] == 0):
         col = tuple(box.bg) if len(box.bg) == 4 else (*box.bg, 255)

@@ -224,3 +224,17 @@ Receipts: mozosubz.xyz 0 overlaps, tiles even, panels inside viewport; 53/53.
 - entry-agents.dev hero H1/paragraph overlap GONE (vision-confirmed clean).
 - mozosubz.xyz para/CTA boundary flush; objective pixel check shows descenders fully
   painted above the button top (no clip).
+
+## Batch 24 — inline SVG painter (breakthrough #16)
+- Minimal SVG renderer in render.py: rect/circle/ellipse/line/polyline/polygon/path
+  (M L H V C S Q T Z, abs+rel, arc→endpoint line), viewBox scaling, stroke=currentColor
+  (engine color), fill, stroke-width, rounded rects. Compact-decimal path data
+  ("4.5.5") split; malformed-arc/C guards.
+- THE blocked bug: overflow-hidden boxes paint children into a cropped layer but child
+  absolute coords were never translated → EVERYTHING inside overflow-hidden panels
+  (icons, card content) silently painted outside the layer. Fixed with _LAYER_SHIFT
+  context applied at layer root (copy box + span coords once).
+- 288 svg paint calls on mozosubz.xyz alone; all four tile icons + hamburger + wallet
+  + checkmarks render (vision-confirmed).
+Receipts: mozosubz.xyz 7/10 (was 4), icons done; entry-agents.dev hero CLEAN (vision:
+"no glyph collision"). 53/53.
