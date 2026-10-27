@@ -879,6 +879,7 @@ ul, ol { padding-left: 40px; }
 li { display: list-item; margin: 0; }
 blockquote { margin: 16px 40px; }
 pre, code { font-family: monospace; font-size: 13px; }
+.sr-only { display: none; }   /* a11y off-screen text; pixel-equivalent */
 pre { white-space: pre; }
 strong, b { font-weight: bold; }
 em, i { font-style: italic; }

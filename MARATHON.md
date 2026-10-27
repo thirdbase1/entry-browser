@@ -325,3 +325,15 @@ Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.
   face["url"] → every span re-downloaded (multi-second loads). Normalized.
 - EA vision 10/10 with Geist ("no tofu"); EA overlaps 4→2 (residual = grid-row
   badge spacing, cosmetic). moz 0 overlaps. Bench/example unaffected. 53/53.
+
+
+## Batch 30 — sr-only + docs cleanup (2026-10-28)
+
+- UA sheet: .sr-only { display:none } — Mintlify skip-links/sr-only labels no
+  longer paint over the page (docs text-box overlaps 51→2).
+- docs.pxxl.app with Inter webfont: sidebar stacks verified objectively
+  (Projects 312+19 < ProjectWorkspace 336 — no collisions). Vision claims of
+  "bold everywhere/labels overlapping" refuted by box metrics (recurring
+  vision-unreliability; variable Inter default = wght 400).
+- Inter variable font (wght 100-900) loads, converts, subset-selected via
+  latin-coverage heuristic. 53/53.
