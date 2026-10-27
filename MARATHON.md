@@ -337,3 +337,23 @@ Receipts: entry-agents.dev 8 overlaps; moz 0; wiki 342; 53/53.
   vision-unreliability; variable Inter default = wght 400).
 - Inter variable font (wght 100-900) loads, converts, subset-selected via
   latin-coverage heuristic. 53/53.
+
+
+## Batch 31 — pxxl hero rotator breakthrough (2026-10-28)
+
+- **Date constructor shim**: rotator uses `new Date()` (not Date.now) — shimmed
+  Date globally (prototype preserved) so framer-style elapsed-time math advances
+  on the virtual clock.
+- **domshim textContent accessor**: setting textContent now creates a real text
+  node child (was a bare prop → serial HTML showed empty spans). pxxl serialize
+  794→958 nodes, 102,530→108,812 bytes.
+- **Rotating word RENDERS**: "websites"/"backend" spans painted (crossfade
+  superposition = faithful mid-animation state).
+- **font-weight>=600 maps to bold** — Geist-SemiBold face now used for
+  font-semibold text (was falling back to wider DejaVu).
+- **css base-URL rewrite in render pipeline** (p_render_csr2): relative and
+  root-relative font urls rewritten absolute (root /fonts/ vs /assets/ distinction).
+- Residual: rotator inline-block wraps to line 2 (h1 shrink-to-fit width 576 vs
+  needed ~580 — flex-item shrink measure must include inline-block preferred
+  widths; 4px). pxxl counter spans and hero word now both live in DOM.
+- 53/53. Head: batch 31 pushed.
